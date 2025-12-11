@@ -87,38 +87,33 @@ interface Props {
 }
 
 /* Utilities (short names) */
-
-/* Utilities (short names) */
-function robustParseNumber(input: any): { value: number; isNegative: boolean; original: string } {
-  if (input === undefined || input === null) {
+function robustParseNumber(input: any): {
+  value: number;
+  isNegative: boolean;
+  original: string;
+} {
+  if (input === undefined || input === null)
     return { value: 0, isNegative: false, original: "" };
-  }
 
-  if (typeof input === "number") {
+  if (typeof input === "number")
     return { value: input, isNegative: input < 0, original: String(input) };
-  }
 
-  const original = String(input).trim();
-  let s = original.replace(/[^0-9\-().,]/g, "").trim();
+  let original = String(input).trim();
+  let s = original.replace(/[^0-9().,+-]/g, "").trim();
 
   let isNegative = false;
+
   if (s.startsWith("(") && s.endsWith(")")) {
     isNegative = true;
     s = "-" + s.slice(1, -1);
   }
 
-  s = s.replace(/,/g, "");
-  if (s === "" || s === "-" || s === "-.") {
-    return { value: 0, isNegative: false, original };
-  }
-
-  const num = Number.parseFloat(s);
-  if (Number.isNaN(num)) {
-    return { value: 0, isNegative, original };
-  }
+  const num = parseFloat(s.replace(/,/g, ""));
+  if (Number.isNaN(num)) return { value: 0, isNegative, original };
 
   return { value: num, isNegative: isNegative || num < 0, original };
 }
+
 
 /* Absolute value helper */
 function amountAbsOf(x: any): number {
