@@ -2613,3 +2613,158 @@ if (typeof window !== "undefined") {
   });
 }
 export default SmartReconciliation;
+
+/* ===== auto-added helpers BEGIN ===== */
+export type AmountNormalization = {
+  OriginalAmount: string | number;
+  SignedAmount: number;
+  AmountAbs: number;
+  AmountType: "debit" | "credit" | "unknown";
+};
+
+export function normalizeAmount(input: string | number | null | undefined): AmountNormalization {
+  const OriginalAmount = input === null || input === undefined ? "" : input;
+  try {
+    if (typeof input === "number") {
+      const SignedAmount = Number(input);
+      const AmountAbs = Math.abs(SignedAmount);
+      const AmountType = SignedAmount < 0 ? "debit" : (SignedAmount > 0 ? "credit" : "unknown");
+      return { OriginalAmount, SignedAmount, AmountAbs, AmountType };
+    }
+    let s = String(input).trim();
+    s = s.replace(/[\u00A0\s]+/g, "");
+    s = s.replace(/^[^\d\-\(\+]+|[^\d\)\-\.]+$/g, "");
+    let negative = false;
+    if (/^\(.*\)$/.test(s)) {
+      negative = true;
+      s = s.replace(/^\(|\)$/g, "");
+    }
+    s = s.replace(/[, ]+/g, "");
+    const n = Number(s);
+    const SignedAmount = Number.isFinite(n) ? (negative ? -n : n) : 0;
+    const AmountAbs = Math.abs(SignedAmount);
+    const AmountType = SignedAmount < 0 ? "debit" : (SignedAmount > 0 ? "credit" : "unknown");
+    return { OriginalAmount, SignedAmount, AmountAbs, AmountType };
+  } catch (e) {
+    return { OriginalAmount, SignedAmount: 0, AmountAbs: 0, AmountType: "unknown" };
+  }
+}
+
+export type ParsedRow = Record<string, string | number | null>;
+export type ParseOptions = { hasHeader?: boolean; delimiter?: string; maxRows?: number; };
+
+function stripFormula(value: string): string {
+  if (typeof value !== "string") return value;
+  if (value.startsWith("=") && !value.startsWith("==")) {
+    return value.slice(1);
+  }
+  return value;
+}
+
+export function parseCSV(text: string, opts?: ParseOptions): { header: string[]; rows: ParsedRow[] } {
+  const options = { hasHeader: true, delimiter: ",", maxRows: 200000, ...(opts || {}) };
+  const delim = options.delimiter!;
+  const lines = text.split(/\r?\n/);
+  const safeLines = lines.slice(0, options.maxRows).filter(l => l.length > 0);
+  const rows: string[][] = [];
+  for (const line of safeLines) {
+    const row: string[] = [];
+    let cur = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i+1] === '"') { cur += '"'; i++; continue; }
+        inQuotes = !inQuotes;
+        continue;
+      }
+      if (!inQuotes && ch === delim) {
+        row.push(stripFormula(cur));
+        cur = "";
+        continue;
+      }
+      cur += ch;
+    }
+    row.push(stripFormula(cur));
+    rows.push(row);
+  }
+  let header: string[] = [];
+  const parsed: ParsedRow[] = [];
+  if (options.hasHeader && rows.length > 0) {
+    header = rows[0].map((h, idx) => (h && String(h).trim().length > 0 ? String(h).trim() : `col_${idx+1}`));
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      const obj: ParsedRow = {};
+      for (let j = 0; j < header.length; j++) {
+        obj[header[j]] = (j < r.length ? (r[j] === "" ? null : r[j]) : null);
+      }
+      parsed.push(obj);
+    }
+  } else {
+    const maxCols = rows.length > 0 ? Math.max(...rows.map(r => r.length)) : 0;
+    header = Array.from({length: maxCols}, (_,i)=>`col_${i+1}`);
+    for (const r of rows) {
+      const obj: ParsedRow = {};
+      for (let j = 0; j < header.length; j++) {
+        obj[header[j]] = (j < r.length ? (r[j] === "" ? null : r[j]) : null);
+      }
+      parsed.push(obj);
+    }
+  }
+  return { header, rows: parsed };
+}
+
+export type Sheet = { name: string; rows: ParsedRow[] };
+
+export function parseAllInOne(input: string | Sheet[], opts?: ParseOptions & { amountColumn?: string }) {
+  if (Array.isArray(input)) {
+    return { sheets: input.map(s => ({ name: s.name || "sheet", rows: s.rows })) };
+  } else {
+    const parsed = parseCSV(input, opts);
+    return { sheets: [{ name: "Sheet1", rows: parsed.rows }] };
+  }
+}
+
+export function splitDebitCredit(rows: ParsedRow[], amountCol: string) {
+  const debits: ParsedRow[] = [];
+  const credits: ParsedRow[] = [];
+  for (const r of rows) {
+    const raw = r[amountCol];
+    const norm = normalizeAmount(raw as any);
+    (r as any).__amount = norm;
+    if (norm.SignedAmount < 0) debits.push(r);
+    else if (norm.SignedAmount > 0) credits.push(r);
+    else credits.push(r);
+  }
+  return { debits, credits };
+}
+
+export function reconcileByAbs(rowsA: ParsedRow[], rowsB: ParsedRow[], amountColA: string, amountColB: string) {
+  const mapA = new Map<number, ParsedRow[]>();
+  for (const r of rowsA) {
+    const n = normalizeAmount(r[amountColA] as any);
+    (r as any).__amount = n;
+    const arr = mapA.get(n.AmountAbs) || [];
+    arr.push(r);
+    mapA.set(n.AmountAbs, arr);
+  }
+  const matches: Array<{ left: ParsedRow; right: ParsedRow }> = [];
+  const unmatchedB: ParsedRow[] = [];
+  for (const r of rowsB) {
+    const n = normalizeAmount(r[amountColB] as any);
+    (r as any).__amount = n;
+    const candidates = mapA.get(n.AmountAbs);
+    if (candidates && candidates.length > 0) {
+      matches.push({ left: candidates.shift()!, right: r });
+    } else {
+      unmatchedB.push(r);
+    }
+  }
+  const unmatchedA = Array.from(mapA.values()).flat();
+  return { matches, unmatchedA, unmatchedB };
+}
+
+export async function heavyParseServerSide(csvText: string, opts?: ParseOptions) {
+  return parseCSV(csvText, opts);
+}
+
