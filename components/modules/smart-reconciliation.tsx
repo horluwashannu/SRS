@@ -2615,7 +2615,7 @@ export function normalizeAmount(input: string | number | null | undefined): Amou
     }
     let s = String(input).trim();
     s = s.replace(/[u00A0s]+/g, "");
-    s = s.replace(/^[^d-(+]+|[^d)-.]+$/g, "");
+    s = s.replace(/[^0-9().,+-]/g, ""); 
     let negative = false;
     if (/^(.*)$/.test(s)) {
       negative = true;
