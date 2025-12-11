@@ -105,7 +105,7 @@ function amountAbsOf(x: any): number {
   if (input === undefined || input === null) return { value: 0, isNegative: false, original: "" };
   if (typeof input === "number") return { value: input, isNegative: input < 0, original: String(input) };
   let original = String(input).trim();
-  let s = original.replace(/[^0-9\-\(\)\.,]/g, "").trim();
+  let s = original.replace(/[^0-9-().,]/g, "").trim();
   let isNegative = false;
   if (s.startsWith("(") && s.endsWith(")")) {
     isNegative = true;
@@ -541,7 +541,7 @@ export function SmartReconciliation({ userId }: Props) {
         continue;
       }
       const dateStr = excelDateToJS(rawDateCandidate);
-      const narrationClean = String(rawNarrationCandidate ?? "").replace(/\s+/g, " ").trim();
+      const narrationClean = String(rawNarrationCandidate ?? "").replace(/s+/g, " ").trim();
       const first15 = narrationClean.substring(0, 15).toUpperCase().trim();
       const last15 = narrationClean.slice(-15).toUpperCase().trim();
       const absAmount = Math.abs(numericAmount);
@@ -554,7 +554,7 @@ export function SmartReconciliation({ userId }: Props) {
         SignedAmount: numericAmount,
         IsNegative: parsedAmount.isNegative,
         AmountAbs: Math.abs(numericAmount),
-        AmountType: (numericAmount < 0 ? \"debit\" : \"credit\"),
+        AmountType: (numericAmount < 0 ? "debit" : "credit"),
         Age: rawAgeCandidate ?? undefined,
         First15: first15,
         Last15: last15,
@@ -644,7 +644,7 @@ export function SmartReconciliation({ userId }: Props) {
       const parsedAmt = robustParseNumber(rawAmt);
       const num = parsedAmt.value;
       const dateStr = excelDateToJS(rawDate);
-      const narrationClean = String(rawNarr ?? "").replace(/\s+/g, " ").trim();
+      const narrationClean = String(rawNarr ?? "").replace(/s+/g, " ").trim();
       const first15 = narrationClean.substring(0, 15).toUpperCase().trim();
       const last15 = narrationClean.slice(-15).toUpperCase().trim();
       const absAmount = Math.abs(num);
@@ -788,7 +788,7 @@ export function SmartReconciliation({ userId }: Props) {
   const handleFileUpload = async (file: File, fileType: "previous" | "current" | "all") => {
     try {
       setUploadProgress(2);
-      if (!file.name.match(/\.(xlsx|xls)$/i)) {
+      if (!file.name.match(/.(xlsx|xls)$/i)) {
         alert("Please upload .xlsx/.xls");
         return;
       }
@@ -2632,12 +2632,12 @@ export function normalizeAmount(input: string | number | null | undefined): Amou
       return { OriginalAmount, SignedAmount, AmountAbs, AmountType };
     }
     let s = String(input).trim();
-    s = s.replace(/[\u00A0\s]+/g, "");
-    s = s.replace(/^[^\d\-\(\+]+|[^\d\)\-\.]+$/g, "");
+    s = s.replace(/[u00A0s]+/g, "");
+    s = s.replace(/^[^d-(+]+|[^d)-.]+$/g, "");
     let negative = false;
-    if (/^\(.*\)$/.test(s)) {
+    if (/^(.*)$/.test(s)) {
       negative = true;
-      s = s.replace(/^\(|\)$/g, "");
+      s = s.replace(/^(|)$/g, "");
     }
     s = s.replace(/[, ]+/g, "");
     const n = Number(s);
@@ -2767,4 +2767,4 @@ export function reconcileByAbs(rowsA: ParsedRow[], rowsB: ParsedRow[], amountCol
 export async function heavyParseServerSide(csvText: string, opts?: ParseOptions) {
   return parseCSV(csvText, opts);
 }
-
+/* ===== auto-added helpers END ===== */
