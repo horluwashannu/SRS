@@ -87,15 +87,19 @@ interface Props {
 }
 
 /* Utilities (short names) */
+
+/* Utilities (short names) */
 function robustParseNumber(input: any): { value: number; isNegative: boolean; original: string } {
-  if (input === undefined || input === null)
+  if (input === undefined || input === null) {
     return { value: 0, isNegative: false, original: "" };
+  }
 
-  if (typeof input === "number")
+  if (typeof input === "number") {
     return { value: input, isNegative: input < 0, original: String(input) };
+  }
 
-  let original = String(input).trim();
-  let s = original.replace(/[^0-9-().,]/g, "").trim();
+  const original = String(input).trim();
+  let s = original.replace(/[^0-9\-().,]/g, "").trim();
 
   let isNegative = false;
   if (s.startsWith("(") && s.endsWith(")")) {
@@ -104,16 +108,23 @@ function robustParseNumber(input: any): { value: number; isNegative: boolean; or
   }
 
   s = s.replace(/,/g, "");
-  if (s === "" || s === "-")
+  if (s === "" || s === "-" || s === "-.") {
     return { value: 0, isNegative: false, original };
+  }
 
   const num = Number.parseFloat(s);
-  if (Number.isNaN(num))
+  if (Number.isNaN(num)) {
     return { value: 0, isNegative, original };
+  }
 
   return { value: num, isNegative: isNegative || num < 0, original };
 }
 
+/* Absolute value helper */
+function amountAbsOf(x: any): number {
+  const { value } = robustParseNumber(x);
+  return Math.abs(value);
+}
 
 function excelDateToJS(value: any): string {
   if (value === undefined || value === null || value === "") return "";
@@ -156,32 +167,6 @@ function formatDisplayNumber(n: number | null | undefined): string {
 function normalizeLabel(s: string) {
   return s.replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
-
-const META_KEY_MAP: Record<string, string> = {
-  branchcode: "BranchCode",
-  "branch code": "BranchCode",
-  branchname: "BranchName",
-  "branch name": "BranchName",
-  accountname: "AccountName",
-  "account name": "AccountName",
-  accountno: "AccountNo",
-  "account no": "AccountNo",
-  currency: "Currency",
-  prooftotal: "ProofTotal",
-  "proof total": "ProofTotal",
-  systembalance: "SystemBalance",
-  "system balance": "SystemBalance",
-  maker: "Maker",
-  checker: "Checker",
-  rico: "Rico",
-  clco: "Clco",
-};
-
-function uid() {
-  return Math.random().toString(36).slice(2, 9);
-}
-
-const LS_KEY = "smart_recon_session_v4";
 
 /* Component */
 export function SmartReconciliation({ userId }: Props) {
