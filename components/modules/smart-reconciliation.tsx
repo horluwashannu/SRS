@@ -2723,5 +2723,5 @@ async function parseAllInOne(file: File) {
   setUploadedAllCredits(credits);
 }
 
-// --- END AUTO PATCH ---
+export default SmartReconciliation;
 
