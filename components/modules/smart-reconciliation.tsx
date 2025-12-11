@@ -2588,39 +2588,6 @@ export function parseCSV(text: string, opts?: ParseOptions): { header: string[];
 
 export type Sheet = { name: string; rows: ParsedRow[] };
 
-export function parseAllInOneInput(input: string | Sheet[], opts?: ParseOptions & { amountColumn?: string }) {
-  if (Array.isArray(input)) {
-    return { sheets: input.map(s => ({ name: s.name || "sheet", rows: s.rows })) };
-  } else {
-    const parsed = parseCSV(input, opts);
-    return { sheets: [{ name: "Sheet1", rows: parsed.rows }] };
-  }
-}
-
-export function splitDebitCredit(rows: ParsedRow[], amountCol: string) {
-  const debits: ParsedRow[] = [];
-  const credits: ParsedRow[] = [];
-  for (const r of rows) {
-    const raw = r[amountCol];
-    const norm = normalizeAmount(raw as any);
-    (r as any).__amount = norm;
-    if (norm.SignedAmount < 0) debits.push(r);
-    else if (norm.SignedAmount > 0) credits.push(r);
-    else credits.push(r);
-  }
-  return { debits, credits };
-}
-
-export function reconcileByAbs(rowsA: ParsedRow[], rowsB: ParsedRow[], amountColA: string, amountColB: string) {
-  const mapA = new Map<number, ParsedRow[]>();
-  for (const r of rowsA) {
-    const n = normalizeAmount(r[amountColA] as any);
-    (r as any).__amount = n;
-    const arr = mapA.get(n.AmountAbs) || [];
-    arr.push(r);
-    mapA.set(n.AmountAbs, arr);
-  }
-  const matches: Array<{ left: ParsedRow; right: ParsedRow }> = [];
   const unmatchedB: ParsedRow[] = [];
   for (const r of rowsB) {
     const n = normalizeAmount(r[amountColB] as any);
@@ -2667,65 +2634,28 @@ function normalizeRow(raw: any, sheetName: string): any {
   };
 }
 
-
 async function parseAllInOne(file: File) {
-  // Defensive: use normalizeRow to parse each row so structure matches multi/one
-  if (!file) {
-    setLastParseLog && setLastParseLog("No file provided to parseAllInOne");
-    return { rows: [], debits: [], credits: [] };
-  }
-  try {
-    const data = await file.arrayBuffer();
-    const workbook = (typeof XLSX !== 'undefined' ? XLSX : require('xlsx')).read(data, { type: 'array', cellDates: true, raw: true, defval: '' });
-    const collected = [];
-    for (const sheetName of workbook.SheetNames || []) {
-      const ws = workbook.Sheets[sheetName];
-      if (!ws) continue;
-      const rawRows = (typeof XLSX !== 'undefined' ? XLSX : require('xlsx')).utils.sheet_to_json(ws, { defval: '' });
-      for (const raw of rawRows) {
-        try {
-          const row = (typeof normalizeRow === 'function') ? normalizeRow(raw, sheetName) : {
-            Date: excelDateToJS(raw?.Date),
-            Narration: String(raw?.Narration ?? raw?.Narr ?? ''),
-            OriginalAmount: String(raw?.Amount ?? raw?.OriginalAmount ?? ''),
-            SignedAmount: Number((raw?.Amount ?? 0)),
-            IsNegative: Number((raw?.Amount ?? 0)) < 0,
-            AmountAbs: Math.abs(Number((raw?.Amount ?? 0))),
-            AmountType: Number((raw?.Amount ?? 0)) < 0 ? 'debit' : 'credit',
-            First15: (String(raw?.Narration ?? '').slice(0,15)),
-            Last15: (String(raw?.Narration ?? '').slice(-15)),
-            HelperKey1: '',
-            HelperKey2: '',
-            SheetName: sheetName,
-            __id: (typeof uid === 'function' ? uid() : Math.random().toString(36).slice(2,9)),
-          };
-          // normalize fields
-          row.SheetName = row.SheetName || sheetName;
-          row.OriginalAmount = row.OriginalAmount ?? '';
-          row.SignedAmount = Number.isFinite(Number(row.SignedAmount)) ? Number(row.SignedAmount) : 0;
-          row.AmountAbs = Math.abs(row.SignedAmount);
-          row.AmountType = row.SignedAmount < 0 ? 'debit' : 'credit';
-          collected.push(row);
-        } catch (e) {
-          // skip bad row but continue parsing
-          console.warn('parseAllInOne: skipping row due to error', e);
-        }
-      }
+  const data = await file.arrayBuffer();
+  const workbook = XLSX.read(data, { type: "array" });
+
+  const collected: any[] = [];
+
+  for (const sheetName of workbook.SheetNames) {
+    const ws = workbook.Sheets[sheetName];
+    const rawRows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+    for (const raw of rawRows) {
+      const row = normalizeRow(raw, sheetName);
+      collected.push(row);
     }
-    const debits = collected.filter(r => r.AmountType === 'debit');
-    const credits = collected.filter(r => r.AmountType === 'credit');
-    if (typeof setUploadedAll === 'function') setUploadedAll(collected);
-    if (typeof setUploadedAllDebits === 'function') setUploadedAllDebits(debits);
-    if (typeof setUploadedAllCredits === 'function') setUploadedAllCredits(credits);
-    setLastParseLog && setLastParseLog(`${new Date().toISOString()} - ${file.name} parsed. rows=${collected.length} debits=${debits.length} credits=${credits.length}`);
-    return { rows: collected, debits, credits };
-  } catch (err) {
-    console.error('parseAllInOne error', err);
-    setLastParseLog && setLastParseLog('parseAllInOne error: ' + String(err?.message ?? err));
-    return { rows: [], debits: [], credits: [] };
   }
+
+  const debits = collected.filter(r => r.AmountType === "debit");
+  const credits = collected.filter(r => r.AmountType === "credit");
+
+  setUploadedAll(collected);
+  setUploadedAllDebits(debits);
+  setUploadedAllCredits(credits);
 }
 
-
 // --- END AUTO PATCH ---
-
