@@ -42,7 +42,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { getSupabaseClient } from "@/lib/supabase";
 function uid(): string { return Math.random().toString(36).slice(2, 9); }
 
-
 /* Types */
 type Side = "debit" | "credit";
 type Status = "matched" | "pending" | "auto";
@@ -172,7 +171,6 @@ function formatDisplayNumber(n: number | null | undefined): string {
 function normalizeLabel(s: string) {
   return s.replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
-
 
 const META_KEY_MAP: Record<string, string> = {
   branchcode: "BranchCode",
@@ -2485,36 +2483,7 @@ function SelectableTableCompact({
 }
 
 /* prevent refresh & keep-alive */
-if (typeof window !== "undefined") {
-  document.addEventListener("keydown", function (e) {
-    if (
-      e.key === "F5" ||
-      (e.ctrlKey && e.key.toLowerCase() === "r") ||
-      (e.metaKey && e.key.toLowerCase() === "r")
-    ) {
-      e.preventDefault();
-      alert("Refresh disabled.");
-    }
-  });
 
-  window.addEventListener("beforeunload", function (e) {
-    e.preventDefault();
-    e.returnValue = "";
-  });
-
-  let lastPing = Date.now();
-  const keepAlive = setInterval(() => {
-    // heartbeat
-    lastPing = Date.now();
-    window.__smartReconKeepAlive = { lastPing };
-  }, 1000 * 60);
-
-  ["mousemove", "keydown", "click"].forEach((evt) => {
-    window.addEventListener(evt, () => {
-      lastPing = Date.now();
-    });
-  });
-}
 export default SmartReconciliation;
 
 /* ===== auto-added helpers BEGIN ===== */
@@ -2619,7 +2588,7 @@ export function parseCSV(text: string, opts?: ParseOptions): { header: string[];
 
 export type Sheet = { name: string; rows: ParsedRow[] };
 
-export function parseAllInOne(input: string | Sheet[], opts?: ParseOptions & { amountColumn?: string }) {
+export function parseAllInOneInput(input: string | Sheet[], opts?: ParseOptions & { amountColumn?: string }) {
   if (Array.isArray(input)) {
     return { sheets: input.map(s => ({ name: s.name || "sheet", rows: s.rows })) };
   } else {
@@ -2672,7 +2641,6 @@ export async function heavyParseServerSide(csvText: string, opts?: ParseOptions)
 }
 /* ===== auto-added helpers END ===== */
 
-
 // --- AUTO PATCH: normalizeRow + parseAllInOne ---
 
 function normalizeRow(raw: any, sheetName: string): any {
@@ -2723,5 +2691,5 @@ async function parseAllInOne(file: File) {
   setUploadedAllCredits(credits);
 }
 
-export default SmartReconciliation;
+// --- END AUTO PATCH ---
 
