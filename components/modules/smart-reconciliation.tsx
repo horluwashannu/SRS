@@ -690,7 +690,7 @@ export function SmartReconciliation({ userId }: Props) {
     try {
       setUploadProgress(2);
       if (!file.name.match(/.(xlsx|xls)$/i)) {
-        alert("Please upload .xlsx/.xls");
+        alert("Please upload xlsx/.xls");
         return;
       }
 
@@ -1918,7 +1918,7 @@ export function SmartReconciliation({ userId }: Props) {
                   <Upload className="mb-2 h-5 w-5 text-muted-foreground" />
                   <span className="text-sm font-medium">{allFile ? allFile.name : "Click to upload"}</span>
                   <span className="mt-1 text-xs text-muted-foreground">.xlsx/.xls</span>
-                  <input type="file" className="hidden" accept=".xlsx,.xls" ref={fileInputAllRef} onChange={(e) => e.target.files?.[0] && (setAllFile(e.target.files[0]), handleFileUpload(e.target.files[0], "all"))} />
+                  <input type="file" className="hidden" accept=".xlsx,xls" ref={fileInputAllRef} onChange={(e) => e.target.files?.[0] && (setAllFile(e.target.files[0]), handleFileUpload(e.target.files[0], "all"))} />
                 </label>
 
                 <div className="mt-3">
@@ -1969,7 +1969,7 @@ export function SmartReconciliation({ userId }: Props) {
                   <Upload className="mb-2 h-5 w-5 text-muted-foreground" />
                   <span className="text-sm font-medium">{prevFile ? prevFile.name : "Click to upload"}</span>
                   <span className="mt-1 text-xs text-muted-foreground">.xlsx/.xls</span>
-                  <input type="file" className="hidden" accept=".xlsx,.xls" ref={fileInputPrevRef} onChange={(e) => e.target.files?.[0] && (setPrevFile(e.target.files[0]), handleFileUpload(e.target.files[0], "previous"))} />
+                  <input type="file" className="hidden" accept=".xlsx,xls" ref={fileInputPrevRef} onChange={(e) => e.target.files?.[0] && (setPrevFile(e.target.files[0]), handleFileUpload(e.target.files[0], "previous"))} />
                 </label>
 
                 <div className="mt-3 flex gap-2 items-center">
@@ -2046,7 +2046,7 @@ export function SmartReconciliation({ userId }: Props) {
                   <Upload className="mb-2 h-5 w-5 text-muted-foreground" />
                   <span className="text-sm font-medium">{currFile ? currFile.name : "Click to upload"}</span>
                   <span className="mt-1 text-xs text-muted-foreground">.xlsx/.xls</span>
-                  <input type="file" className="hidden" accept=".xlsx,.xls" ref={fileInputCurrRef} onChange={(e) => e.target.files?.[0] && (setCurrFile(e.target.files[0]), handleFileUpload(e.target.files[0], "current"))} />
+                  <input type="file" className="hidden" accept=".xlsx,xls" ref={fileInputCurrRef} onChange={(e) => e.target.files?.[0] && (setCurrFile(e.target.files[0]), handleFileUpload(e.target.files[0], "current"))} />
                 </label>
 
                 <div className="mt-3">
@@ -2599,13 +2599,13 @@ export type Sheet = { name: string; rows: ParsedRow[] };
       unmatchedB.push(r);
     }
   }
-
- function finalizeReconciliation(matches, mapA, unmatchedB) {
   const unmatchedA = Array.from(mapA.values()).flat();
-  return { matches, unmatchedA, unmatchedB };
+
+function finalizeReconciliation(matches, mapA, unmatchedB) {
+  
 }
-
-
+return { matches, unmatchedA, unmatchedB };
+}
 
 export async function heavyParseServerSide(csvText: string, opts?: ParseOptions) {
   return parseCSV(csvText, opts);
