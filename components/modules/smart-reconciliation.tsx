@@ -87,38 +87,45 @@ interface Props {
 }
 
 /* Utilities (short names) */
-function robustParseNumber(input: any): {
-  value: number;
-  isNegative: boolean;
-  original: string;
-} {
-  if (input === undefined || input === null)
+
+/* Utilities (short names) */
+function robustParseNumber(input: any): { value: number; isNegative: boolean; original: string } {
+  if (input === undefined || input === null) {
     return { value: 0, isNegative: false, original: "" };
+  }
 
-  if (typeof input === "number")
+  if (typeof input === "number") {
     return { value: input, isNegative: input < 0, original: String(input) };
+  }
 
-  let original = String(input).trim();
-  let s = original.replace(/[^0-9().,+-]/g, "").trim();
+  const original = String(input).trim();
+  // allow digits, signs, parentheses, comma, dot
+  let s = original.replace(/[^0-9\-\(\)\.,+]/g, "").trim();
 
   let isNegative = false;
-
   if (s.startsWith("(") && s.endsWith(")")) {
     isNegative = true;
     s = "-" + s.slice(1, -1);
   }
 
-  const num = parseFloat(s.replace(/,/g, ""));
-  if (Number.isNaN(num)) return { value: 0, isNegative, original };
+  // remove grouping commas
+  s = s.replace(/,/g, "");
+  if (s === "" || s === "-" || s === "-.") {
+    return { value: 0, isNegative: false, original };
+  }
+
+  const num = Number.parseFloat(s);
+  if (Number.isNaN(num)) {
+    return { value: 0, isNegative, original };
+  }
 
   return { value: num, isNegative: isNegative || num < 0, original };
 }
 
-
 /* Absolute value helper */
 function amountAbsOf(x: any): number {
-  const { value } = robustParseNumber(x);
-  return Math.abs(value);
+  const parsed = robustParseNumber(x);
+  return Math.abs(parsed.value);
 }
 
 function excelDateToJS(value: any): string {
@@ -132,7 +139,8 @@ function excelDateToJS(value: any): string {
   }
   if (typeof value === "number") {
     try {
-      const dt = (XLSX as any).SSF && (XLSX as any).SSF.parse_date_code ? (XLSX as any).SSF.parse_date_code(value) : null;
+      const SSF = (XLSX as any).SSF;
+      const dt = SSF && SSF.parse_date_code ? SSF.parse_date_code(value) : null;
       if (dt) {
         const dd = String(dt.d).padStart(2, "0");
         const mm = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][dt.m - 1];
@@ -162,6 +170,27 @@ function formatDisplayNumber(n: number | null | undefined): string {
 function normalizeLabel(s: string) {
   return s.replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
+
+
+const META_KEY_MAP: Record<string, string> = {
+  branchcode: "BranchCode",
+  "branch code": "BranchCode",
+  branchname: "BranchName",
+  "branch name": "BranchName",
+  accountname: "AccountName",
+  "account name": "AccountName",
+  accountno: "AccountNo",
+  "account no": "AccountNo",
+  currency: "Currency",
+  prooftotal: "ProofTotal",
+  "proof total": "ProofTotal",
+  systembalance: "SystemBalance",
+  "system balance": "SystemBalance",
+  maker: "Maker",
+  checker: "Checker",
+  rico: "Rico",
+  clco: "Clco",
+};
 
 /* Component */
 export function SmartReconciliation({ userId }: Props) {
@@ -2609,8 +2638,8 @@ export function normalizeAmount(input: string | number | null | undefined): Amou
       return { OriginalAmount, SignedAmount, AmountAbs, AmountType };
     }
     let s = String(input).trim();
-    s = s.replace(/[u00A0s]+/g, "");
-    s = s.replace(/[^0-9().,+-]/g, ""); 
+    s = s.replace(/[\u00A0\s]+/g, "");
+    s = s.replace(/[^0-9().,+-]/g, "");
     let negative = false;
     if (/^(.*)$/.test(s)) {
       negative = true;
