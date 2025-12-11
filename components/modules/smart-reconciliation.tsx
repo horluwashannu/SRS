@@ -51,6 +51,9 @@ interface TransactionRow {
   OriginalAmount: string;
   SignedAmount: number;
   IsNegative: boolean;
+  AmountAbs: number;
+  AmountType: "debit" | "credit";
+
   Age?: string | number;
   First15: string;
   Last15: string;
@@ -84,7 +87,21 @@ interface Props {
 }
 
 /* Utilities (short names) */
-function robustParseNumber(input: any): { value: number; isNegative: boolean; original: string } {
+function robustParseNumber(input: any): { value: number; isNegative: boolean; original: string } 
+
+function amountAbsOf(x: any): number {
+  try {
+    if (!x) return 0;
+    if (typeof x.AmountAbs === 'number') return x.AmountAbs;
+    const sa = (x.SignedAmount !== undefined && x.SignedAmount !== null) ? Number(x.SignedAmount) : 0;
+    if (!Number.isFinite(sa)) return Math.abs(Number(sa) || 0);
+    return Math.abs(sa);
+  } catch (e) {
+    return Math.abs((x && x.SignedAmount) || 0);
+  }
+}
+
+{
   if (input === undefined || input === null) return { value: 0, isNegative: false, original: "" };
   if (typeof input === "number") return { value: input, isNegative: input < 0, original: String(input) };
   let original = String(input).trim();
@@ -364,7 +381,7 @@ export function SmartReconciliation({ userId }: Props) {
     const arrayBuffer = await file.arrayBuffer();
     setUploadProgress(15);
 
-    const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true, raw: false, defval: "" });
+    const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true, raw: true, defval: "" });
     setUploadProgress(25);
 
     if (!workbook || !workbook.SheetNames || workbook.SheetNames.length === 0) {
@@ -536,6 +553,8 @@ export function SmartReconciliation({ userId }: Props) {
         OriginalAmount: parsedAmount.original,
         SignedAmount: numericAmount,
         IsNegative: parsedAmount.isNegative,
+        AmountAbs: Math.abs(numericAmount),
+        AmountType: (numericAmount < 0 ? \"debit\" : \"credit\"),
         Age: rawAgeCandidate ?? undefined,
         First15: first15,
         Last15: last15,
@@ -560,7 +579,7 @@ export function SmartReconciliation({ userId }: Props) {
   }
 
   async function parseSpecificSheetFromWorkbookBuffer(buffer: ArrayBuffer, sheetName: string, fileNameHint = "sheet_extract.xlsx") {
-    const wb: XLSX.WorkBook = XLSX.read(buffer, { type: "array", cellDates: true, raw: false, defval: "" });
+    const wb: XLSX.WorkBook = XLSX.read(buffer, { type: "array", cellDates: true, raw: true, defval: "" });
     if (!wb.Sheets || !wb.Sheets[sheetName]) {
       throw new Error("Sheet not found");
     }
@@ -576,7 +595,7 @@ export function SmartReconciliation({ userId }: Props) {
     setUploadProgress(5);
     const arrayBuffer = await file.arrayBuffer();
     setUploadProgress(15);
-    const wb = XLSX.read(arrayBuffer, { type: "array", cellDates: true, raw: false, defval: "" });
+    const wb = XLSX.read(arrayBuffer, { type: "array", cellDates: true, raw: true, defval: "" });
     setUploadProgress(25);
     const sheetName = wb.SheetNames[0];
     const sheet = wb.Sheets[sheetName];
@@ -686,11 +705,11 @@ export function SmartReconciliation({ userId }: Props) {
     for (let i = 0; i < rows.length; i++) {
       if (used.has(i)) continue;
       const a = rows[i];
-      const aAbs = Math.abs(a.SignedAmount ?? 0);
+      const aAbs = amountAbsOf(a);
       for (let j = i + 1; j < rows.length; j++) {
         if (used.has(j)) continue;
         const b = rows[j];
-        const bAbs = Math.abs(b.SignedAmount ?? 0);
+        const bAbs = amountAbsOf(b);
         if (aAbs !== bAbs) continue;
         if ((a.SignedAmount ?? 0) * (b.SignedAmount ?? 0) >= 0) continue;
         const aKey1 = `${a.HelperKey1}_${aAbs}`;
@@ -728,8 +747,8 @@ export function SmartReconciliation({ userId }: Props) {
   } {
     const creditIndex = new Map<string, number[]>();
     credits.forEach((c, idx) => {
-      const k1 = `${c.HelperKey1}_${Math.abs(c.SignedAmount ?? 0)}`;
-      const k2 = `${c.HelperKey2}_${Math.abs(c.SignedAmount ?? 0)}`;
+      const k1 = `${c.HelperKey1}_${amountAbsOf(c)}`;
+      const k2 = `${c.HelperKey2}_${amountAbsOf(c)}`;
       if (!creditIndex.has(k1)) creditIndex.set(k1, []);
       if (!creditIndex.has(k2)) creditIndex.set(k2, []);
       creditIndex.get(k1)!.push(idx);
@@ -741,8 +760,8 @@ export function SmartReconciliation({ userId }: Props) {
     for (const d of debits) {
       let foundIdx: number | null = null;
       const keysToTry = [
-        `${d.HelperKey1}_${Math.abs(d.SignedAmount ?? 0)}`,
-        `${d.HelperKey2}_${Math.abs(d.SignedAmount ?? 0)}`
+        `${d.HelperKey1}_${amountAbsOf(d)}`,
+        `${d.HelperKey2}_${amountAbsOf(d)}`
       ];
       for (const k of keysToTry) {
         const arr = creditIndex.get(k);
@@ -787,7 +806,7 @@ export function SmartReconciliation({ userId }: Props) {
       }
 
       const arrayBuffer = await file.arrayBuffer();
-      const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true, raw: false, defval: "" });
+      const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true, raw: true, defval: "" });
 
       if (mode === "multi" && workbook.SheetNames && workbook.SheetNames.length > 1) {
         const candidates = workbook.SheetNames.map((s) => {
@@ -972,13 +991,13 @@ export function SmartReconciliation({ userId }: Props) {
   const computePendingSumForSheet = (sheetName?: string) => {
     if (!sheetName) return 0;
     const rowsForSheet = resultRows.filter(r => r.SheetName === sheetName && (r.status === "pending"));
-    const sum = rowsForSheet.reduce((acc, r) => acc + Math.abs(r.SignedAmount ?? 0), 0);
+    const sum = rowsForSheet.reduce((acc, r) => acc + amountAbsOf(r), 0);
     return sum;
   };
 
   const computePendingSumAll = () => {
     const rows = resultRows.filter(r => r.status === "pending");
-    const sum = rows.reduce((acc, r) => acc + Math.abs(r.SignedAmount ?? 0), 0);
+    const sum = rows.reduce((acc, r) => acc + amountAbsOf(r), 0);
     return sum;
   };
 
@@ -986,14 +1005,14 @@ export function SmartReconciliation({ userId }: Props) {
     if (!sheetName) return { matchedCount: 0, matchedAmount: 0 };
     const rowsForSheet = resultRows.filter(r => r.SheetName === sheetName && (r.status === "matched" || r.status === "auto"));
     const matchedCount = rowsForSheet.length;
-    const matchedAmount = rowsForSheet.reduce((acc, r) => acc + Math.abs(r.SignedAmount ?? 0), 0) / 2;
+    const matchedAmount = rowsForSheet.reduce((acc, r) => acc + amountAbsOf(r), 0) / 2;
     return { matchedCount, matchedAmount };
   };
 
   const computeMatchedSummaryAll = () => {
     const rows = resultRows.filter(r => r.status === "matched" || r.status === "auto");
     const matchedCount = rows.length;
-    const matchedAmount = rows.reduce((acc, r) => acc + Math.abs(r.SignedAmount ?? 0), 0) / 2;
+    const matchedAmount = rows.reduce((acc, r) => acc + amountAbsOf(r), 0) / 2;
     return { matchedCount, matchedAmount };
   };
 
@@ -1036,7 +1055,7 @@ export function SmartReconciliation({ userId }: Props) {
         ...finalPendingCredits.map((r) => ({ ...r, status: "pending" as const, side: "credit" as const, SheetName: currBlock.sheet })),
       ];
 
-      const matchedSum = allMatchedPairs.reduce((acc, p) => acc + Math.abs(p.debit.SignedAmount ?? 0), 0);
+      const matchedSum = allMatchedPairs.reduce((acc, p) => acc + amountAbsOf(p.debit), 0);
 
       const resultsWithMeta = results.map(row => ({
         ...row,
@@ -1145,7 +1164,7 @@ export function SmartReconciliation({ userId }: Props) {
         ...finalPendingCredits.map((r) => ({ ...r, status: "pending" as const, side: "credit" as const })),
       ];
 
-      const matchedSum = allMatchedPairs.reduce((acc, p) => acc + Math.abs(p.debit.SignedAmount ?? 0), 0);
+      const matchedSum = allMatchedPairs.reduce((acc, p) => acc + amountAbsOf(p.debit), 0);
 
       const resultsWithMeta = results.map((row) => ({
         ...row,
@@ -1242,7 +1261,7 @@ export function SmartReconciliation({ userId }: Props) {
         ...finalPendingCredits.map((r) => ({ ...r, status: "pending" as const, side: "credit" as const })),
       ];
 
-      const matchedSum = allMatchedPairs.reduce((acc, p) => acc + Math.abs(p.debit.SignedAmount ?? 0), 0);
+      const matchedSum = allMatchedPairs.reduce((acc, p) => acc + amountAbsOf(p.debit), 0);
 
       const resultsWithMeta = results.map(row => ({
         ...row,
@@ -1500,19 +1519,19 @@ export function SmartReconciliation({ userId }: Props) {
   /* manual match helpers */
   const getPendingAmounts = () => {
     const amounts = new Set<number>();
-    pendingDebits.forEach((d) => amounts.add(Math.abs(d.SignedAmount ?? 0)));
-    pendingCredits.forEach((c) => amounts.add(Math.abs(c.SignedAmount ?? 0)));
+    pendingDebits.forEach((d) => amounts.add(amountAbsOf(d)));
+    pendingCredits.forEach((c) => amounts.add(amountAbsOf(c)));
     return Array.from(amounts).sort((a, b) => a - b);
   };
 
   const filteredPendingDebits = useMemo(() => {
     if (amountFilter === "all") return pendingDebits;
-    return pendingDebits.filter((d) => Math.abs(d.SignedAmount ?? 0) === Number(amountFilter));
+    return pendingDebits.filter((d) => amountAbsOf(d) === Number(amountFilter));
   }, [pendingDebits, amountFilter]);
 
   const filteredPendingCredits = useMemo(() => {
     if (amountFilter === "all") return pendingCredits;
-    return pendingCredits.filter((c) => Math.abs(c.SignedAmount ?? 0) === Number(amountFilter));
+    return pendingCredits.filter((c) => amountAbsOf(c) === Number(amountFilter));
   }, [pendingCredits, amountFilter]);
 
   const manualMatchSelected = async () => {
@@ -1532,8 +1551,8 @@ export function SmartReconciliation({ userId }: Props) {
       return;
     }
 
-    const debCandidates = pendingDebits.filter((d) => Math.abs(d.SignedAmount ?? 0) === amt && String(d.Narration || "").toUpperCase().includes(matchStr));
-    const credCandidates = pendingCredits.filter((c) => Math.abs(c.SignedAmount ?? 0) === amt && String(c.Narration || "").toUpperCase().includes(matchStr));
+    const debCandidates = pendingDebits.filter((d) => amountAbsOf(d) === amt && String(d.Narration || "").toUpperCase().includes(matchStr));
+    const credCandidates = pendingCredits.filter((c) => amountAbsOf(c) === amt && String(c.Narration || "").toUpperCase().includes(matchStr));
 
     if (debCandidates.length === 0 || credCandidates.length === 0) {
       alert("No matching rows.");
@@ -1750,7 +1769,7 @@ export function SmartReconciliation({ userId }: Props) {
               <TableRow key={row.__id ?? idx} className="text-xs">
                 <TableCell className="font-medium text-foreground py-1">{row.Date}</TableCell>
                 <TableCell className="max-w-[360px] text-foreground whitespace-nowrap overflow-hidden text-ellipsis py-1" title={row.Narration}>{row.Narration}</TableCell>
-                <TableCell className="text-right font-mono text-foreground py-1">₦{formatDisplayNumber(Math.abs(row.SignedAmount))}</TableCell>
+                <TableCell className="text-right font-mono text-foreground py-1">₦{formatDisplayNumber(amountAbsOf(row))}</TableCell>
                 <TableCell className="py-1"><Badge variant={row.status === "auto" ? "destructive" : row.status === "matched" ? "success" : "secondary"}>{row.status ?? "—"}</Badge></TableCell>
               </TableRow>
             ))}
@@ -2551,7 +2570,7 @@ function SelectableTableCompact({
                 <TableCell className="py-1"><Checkbox checked={selectedRows.has(globalIndex)} onCheckedChange={() => toggleRow(globalIndex)} /></TableCell>
                 <TableCell className="font-medium text-foreground py-1">{row.Date}</TableCell>
                 <TableCell className="max-w-[360px] text-foreground whitespace-nowrap overflow-hidden text-ellipsis py-1" title={row.Narration}>{row.Narration}</TableCell>
-                <TableCell className="text-right font-mono text-foreground py-1">₦{formatDisplayNumber(Math.abs(row.SignedAmount))}</TableCell>
+                <TableCell className="text-right font-mono text-foreground py-1">₦{formatDisplayNumber(amountAbsOf(row))}</TableCell>
                 <TableCell className="py-1"><Badge variant={row.status === "auto" ? "destructive" : row.status === "matched" ? "success" : "secondary"}>{row.status}</Badge></TableCell>
               </TableRow>
             );
