@@ -40,6 +40,8 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 
 import { getSupabaseClient } from "@/lib/supabase";
+function uid(): string { return Math.random().toString(36).slice(2, 9); }
+
 
 /* Types */
 type Side = "debit" | "credit";
@@ -547,7 +549,7 @@ export function SmartReconciliation({ userId }: Props) {
         continue;
       }
       const dateStr = excelDateToJS(rawDateCandidate);
-      const narrationClean = String(rawNarrationCandidate ?? "").replace(/s+/g, " ").trim();
+      const narrationClean = String(rawNarrationCandidate ?? "").replace(/\s+/g, " ").trim();
       const first15 = narrationClean.substring(0, 15).toUpperCase().trim();
       const last15 = narrationClean.slice(-15).toUpperCase().trim();
       const absAmount = Math.abs(numericAmount);
@@ -650,7 +652,7 @@ export function SmartReconciliation({ userId }: Props) {
       const parsedAmt = robustParseNumber(rawAmt);
       const num = parsedAmt.value;
       const dateStr = excelDateToJS(rawDate);
-      const narrationClean = String(rawNarr ?? "").replace(/s+/g, " ").trim();
+      const narrationClean = String(rawNarr ?? "").replace(/\s+/g, " ").trim();
       const first15 = narrationClean.substring(0, 15).toUpperCase().trim();
       const last15 = narrationClean.slice(-15).toUpperCase().trim();
       const absAmount = Math.abs(num);
