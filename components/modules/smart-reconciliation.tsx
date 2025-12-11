@@ -2776,3 +2776,58 @@ export async function heavyParseServerSide(csvText: string, opts?: ParseOptions)
   return parseCSV(csvText, opts);
 }
 /* ===== auto-added helpers END ===== */
+
+
+
+// --- AUTO PATCH: normalizeRow + parseAllInOne ---
+
+function normalizeRow(raw: any, sheetName: string): any {
+  const { value, isNegative, original } = robustParseNumber(raw?.Amount);
+  const numericAmount = value ?? 0;
+  const narration = String(raw?.Narration || "").trim();
+  const first15 = narration.slice(0, 15);
+  const last15 = narration.slice(-15);
+
+  return {
+    Date: excelDateToJS(raw?.Date),
+    Narration: narration,
+    OriginalAmount: original,
+    SignedAmount: numericAmount,
+    IsNegative: isNegative,
+    AmountAbs: Math.abs(numericAmount),
+    AmountType: numericAmount < 0 ? "debit" : "credit",
+    First15: first15,
+    Last15: last15,
+    HelperKey1: (first15 + last15).toLowerCase(),
+    HelperKey2: String(numericAmount),
+    SheetName: sheetName,
+    __id: uid(),
+  };
+}
+
+async function parseAllInOne(file: File) {
+  const data = await file.arrayBuffer();
+  const workbook = XLSX.read(data, { type: "array" });
+
+  const collected: any[] = [];
+
+  for (const sheetName of workbook.SheetNames) {
+    const ws = workbook.Sheets[sheetName];
+    const rawRows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+    for (const raw of rawRows) {
+      const row = normalizeRow(raw, sheetName);
+      collected.push(row);
+    }
+  }
+
+  const debits = collected.filter(r => r.AmountType === "debit");
+  const credits = collected.filter(r => r.AmountType === "credit");
+
+  setUploadedAll(collected);
+  setUploadedAllDebits(debits);
+  setUploadedAllCredits(credits);
+}
+
+// --- END AUTO PATCH ---
+
