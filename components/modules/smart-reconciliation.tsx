@@ -87,36 +87,33 @@ interface Props {
 }
 
 /* Utilities (short names) */
-function robustParseNumber(input: any): { value: number; isNegative: boolean; original: string } 
+function robustParseNumber(input: any): { value: number; isNegative: boolean; original: string } {
+  if (input === undefined || input === null)
+    return { value: 0, isNegative: false, original: "" };
 
-function amountAbsOf(x: any): number {
-  try {
-    if (!x) return 0;
-    if (typeof x.AmountAbs === 'number') return x.AmountAbs;
-    const sa = (x.SignedAmount !== undefined && x.SignedAmount !== null) ? Number(x.SignedAmount) : 0;
-    if (!Number.isFinite(sa)) return Math.abs(Number(sa) || 0);
-    return Math.abs(sa);
-  } catch (e) {
-    return Math.abs((x && x.SignedAmount) || 0);
-  }
-}
+  if (typeof input === "number")
+    return { value: input, isNegative: input < 0, original: String(input) };
 
-{
-  if (input === undefined || input === null) return { value: 0, isNegative: false, original: "" };
-  if (typeof input === "number") return { value: input, isNegative: input < 0, original: String(input) };
   let original = String(input).trim();
   let s = original.replace(/[^0-9-().,]/g, "").trim();
+
   let isNegative = false;
   if (s.startsWith("(") && s.endsWith(")")) {
     isNegative = true;
     s = "-" + s.slice(1, -1);
   }
+
   s = s.replace(/,/g, "");
-  if (s === "" || s === "-") return { value: 0, isNegative: false, original };
+  if (s === "" || s === "-")
+    return { value: 0, isNegative: false, original };
+
   const num = Number.parseFloat(s);
-  if (Number.isNaN(num)) return { value: 0, isNegative, original };
+  if (Number.isNaN(num))
+    return { value: 0, isNegative, original };
+
   return { value: num, isNegative: isNegative || num < 0, original };
 }
+
 
 function excelDateToJS(value: any): string {
   if (value === undefined || value === null || value === "") return "";
