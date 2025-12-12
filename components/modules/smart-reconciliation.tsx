@@ -2559,7 +2559,7 @@ export async function parseAllInOne(file) {
     const pendingCredits = credits.filter((_,i)=>!usedCreditIdx.has(i));
     return { rows: collected, debits, credits, matchedPairs, pendingDebits, pendingCredits, sheetName: 'All-in-One' };
   } catch(err){ console.error('parseAllInOne error', err); return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [], sheetName: '' }; }
-}
+};
 
 export default SmartReconciliation;
 
