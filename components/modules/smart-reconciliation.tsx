@@ -701,7 +701,7 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
         setUploadedAllDebits(debits);
         setUploadedAllCredits(credits);
         setAllFile(file);
-        setLastParseLog(`${new Date().toISOString()} - ${file.name}\nAll-in-one parsed. Debits: ${debits.length}, Credits: ${credits.length}`);
+        .toISOString()} - ${file.name}\nAll-in-one parsed. Debits: ${debits.length}, Credits: ${credits.length}`);
         alert(`All-in-one parsed: D ${debits.length} • C ${credits.length}`);
         return;
       }
@@ -762,12 +762,12 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
         setSheetProofs(prev => ({ ...prev, [accountName || file.name]: { matchedSum: 0, itemCount: rows.length, status: "pending" } }));
       }
 
-      setLastParseLog(`${new Date().toISOString()} - ${file.name}\n${log}`);
+      .toISOString()} - ${file.name}\n${log}`);
       alert(`${fileType === "previous" ? "Prev" : "Curr"} parsed (${rows.length} rows).`);
     } catch (err: any) {
       console.error("Upload/parse error:", err);
       alert("Parse error");
-      setLastParseLog(String(err?.message ?? err));
+      );
     } finally {
       setUploadProgress(0);
     }
@@ -1326,7 +1326,7 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
     setShowResults(false);
     setSummary({ matchedCount: 0, pendingDebitCount: 0, pendingCreditCount: 0 });
     setSelectedRows(new Set());
-    setLastParseLog("");
+    
     setSystemBalance(null);
     setSystemBalanceInput("");
     setSystemBalanceLocked(false);
@@ -2485,33 +2485,16 @@ function SelectableTableCompact({
 /* prevent refresh & keep-alive */
 
 export async function parseAllInOne(file: File) {
-  if (!file) return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [], sheetName: "" };
+  if (!file) return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [], log: "no file" };
   try {
     const data = await file.arrayBuffer();
     const workbook = XLSX.read(data, { type: 'array', cellDates: true, raw: false, defval: '' });
     const collected = [];
     for (const sheetName of workbook.SheetNames || []) {
-      const ws = workbook.Sheets[sheetName]; if(!ws) continue;
+      const ws = workbook.Sheets[sheetName]; if (!ws) continue;
       const rawRows = XLSX.utils.sheet_to_json(ws, { defval: '' });
       for (const raw of rawRows) {
-        try {
-          const row = (typeof normalizeRow === 'function') ? normalizeRow(raw, sheetName) : {
-            Date: excelDateToJS(raw?.Date ?? raw?.date ?? ''),
-            Narration: String(raw?.Narration ?? raw?.narr ?? '').trim(),
-            OriginalAmount: String(raw?.OriginalAmount ?? raw?.Amount ?? ''),
-            SignedAmount: Number(raw?.SignedAmount ?? raw?.Amount ?? 0),
-            IsNegative: Number(raw?.SignedAmount ?? raw?.Amount ?? 0) < 0,
-            AmountAbs: Math.abs(Number(raw?.SignedAmount ?? raw?.Amount ?? 0)),
-            AmountType: Number(raw?.SignedAmount ?? raw?.Amount ?? 0) < 0 ? 'debit' : 'credit',
-            First15: String((raw?.Narration ?? raw?.narr ?? '').slice(0,15)),
-            Last15: String((raw?.Narration ?? raw?.narr ?? '').slice(-15)),
-            HelperKey1: (String((raw?.Narration ?? raw?.narr ?? '').slice(0,15) + (raw?.Narration ?? raw?.narr ?? '').slice(-15))).toLowerCase(),
-            HelperKey2: String(Number(raw?.SignedAmount ?? raw?.Amount ?? 0)),
-            SheetName: sheetName,
-            __id: (typeof uid === 'function') ? uid() : Math.random().toString(36).slice(2,9)
-          };
-          collected.push(row);
-        } catch(e){ continue; }
+        try { const row = normalizeRow(raw, sheetName); collected.push(row); } catch(e){ continue; }
       }
     }
     const debits = collected.filter(r => r.AmountType === 'debit' || Number(r.SignedAmount) < 0);
@@ -2524,16 +2507,19 @@ export async function parseAllInOne(file: File) {
       if (!creditIndex.has(k2)) creditIndex.set(k2, []);
       creditIndex.get(k1).push(idx); creditIndex.get(k2).push(idx);
     });
-    const matchedPairs=[]; const pendingDebits=[]; const usedCreditIdx=new Set();
-    for(const d of debits){
-      let foundIdx=null;
-      const keys=[`${d.HelperKey1}_${Math.abs(Number(d.SignedAmount)||0)}`, `${d.HelperKey2}_${Math.abs(Number(d.SignedAmount)||0)}`];
-      for(const k of keys){ const arr=creditIndex.get(k); if(arr && arr.length){ const idx=arr.find(i=>!usedCreditIdx.has(i)); if(idx!==undefined){ foundIdx=idx; break; } } }
-      if(foundIdx!==null){ usedCreditIdx.add(foundIdx); matchedPairs.push({debit:d, credit:credits[foundIdx]}); } else pendingDebits.push(d);
+    const matchedPairs = []; const pendingDebits = []; const usedCreditIdx = new Set();
+    for (const d of debits) {
+      let foundIdx = null;
+      const keys = [`${d.HelperKey1}_${Math.abs(Number(d.SignedAmount)||0)}`, `${d.HelperKey2}_${Math.abs(Number(d.SignedAmount)||0)}`];
+      for (const k of keys) {
+        const arr = creditIndex.get(k); if (arr && arr.length) { const idx = arr.find(i => !usedCreditIdx.has(i)); if (idx !== undefined) { foundIdx = idx; break; } }
+      }
+      if (foundIdx !== null) { usedCreditIdx.add(foundIdx); matchedPairs.push({ debit: d, credit: credits[foundIdx] }); } else pendingDebits.push(d);
     }
     const pendingCredits = credits.filter((_,i)=>!usedCreditIdx.has(i));
-    return { rows: collected, debits, credits, matchedPairs, pendingDebits, pendingCredits, sheetName: 'All-in-One' };
-  } catch(err){ console.error('parseAllInOne error', err); return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [], sheetName: '' }; }
+    const log = `${new Date().toISOString()} parsed ${collected.length} rows, matches=${matchedPairs.length}, pendingD=${pendingDebits.length}, pendingC=${pendingCredits.length}`;
+    return { rows: collected, debits, credits, matchedPairs, pendingDebits, pendingCredits, log };
+  } catch (err) { console.error('parseAllInOne error', err); return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [], log: String(err) }; }
 }
 
 export default SmartReconciliation;
@@ -2660,8 +2646,7 @@ function reconcileRows(
   }
 
   // Process B
-  const unmatchedB = [];
-  for (const r of rowsB) {
+  const unmatchedB = [];for (const r of rowsB) {
     const n = normalizeAmount(r[amountColB] as any);
     (r as any).__amount = n;
 
@@ -2709,6 +2694,109 @@ function normalizeRow(raw: any, sheetName: string): any {
     SheetName: sheetName,
     __id: uid(),
   };
+}
+
+async function parseAllInOne(file: File) {
+  // Option C: Use multi-mode parsing logic for every sheet, then auto-match debits vs credits
+  if (!file) {
+    setLastParseLog && 
+    return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [] };
+  }
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const workbook = (typeof XLSX !== 'undefined' ? XLSX : require('xlsx')).read(arrayBuffer, { type: 'array', cellDates: true, raw: false, defval: '' });
+
+    const collected = [];
+
+    for (const sheetName of workbook.SheetNames || []) {
+      const ws = workbook.Sheets[sheetName];
+      if (!ws) continue;
+      const rawRows = (typeof XLSX !== 'undefined' ? XLSX : require('xlsx')).utils.sheet_to_json(ws, { defval: '' });
+      for (const raw of rawRows) {
+        try {
+          const row = (typeof normalizeRow === 'function') ? normalizeRow(raw, sheetName) : (function(){
+            const parsed = (typeof robustParseNumber === 'function') ? robustParseNumber(raw?.Amount ?? raw?.amount ?? raw?.OriginalAmount) : { value: Number(raw?.Amount || 0), isNegative: Number(raw?.Amount||0) < 0, original: String(raw?.Amount||'') };
+            const numericAmount = parsed.value || 0;
+            const narration = String(raw?.Narration || raw?.Narr || '').trim();
+            return {
+              Date: (typeof excelDateToJS === 'function') ? excelDateToJS(raw?.Date) : String(raw?.Date ?? ''),
+              Narration: narration,
+              OriginalAmount: parsed.original,
+              SignedAmount: numericAmount,
+              IsNegative: parsed.isNegative,
+              AmountAbs: Math.abs(numericAmount),
+              AmountType: numericAmount < 0 ? 'debit' : 'credit',
+              First15: narration.slice(0,15),
+              Last15: narration.slice(-15),
+              HelperKey1: (narration.slice(0,15) + narration.slice(-15)).toLowerCase(),
+              HelperKey2: String(numericAmount),
+              SheetName: sheetName,
+              __id: (typeof uid === 'function') ? uid() : Math.random().toString(36).slice(2,9)
+            };
+          })();
+          collected.push(row);
+        } catch (e) {
+          console.warn('parseAllInOne: skipping row', e);
+        }
+      }
+    }
+
+    // split debit/credit
+    const debits = collected.filter(r => (r.AmountType === 'debit') || (Number(r.SignedAmount) < 0));
+    const credits = collected.filter(r => (r.AmountType === 'credit') || (Number(r.SignedAmount) >= 0));
+
+    // auto-match logic: try to match by HelperKey1/HelperKey2 + AmountAbs
+    const creditIndex = new Map();
+    credits.forEach((c, idx) => {
+      const k1 = `${c.HelperKey1}_${Math.abs(Number(c.SignedAmount) || 0)}`;
+      const k2 = `${c.HelperKey2}_${Math.abs(Number(c.SignedAmount) || 0)}`;
+      if (!creditIndex.has(k1)) creditIndex.set(k1, []);
+      if (!creditIndex.has(k2)) creditIndex.set(k2, []);
+      creditIndex.get(k1).push(idx);
+      creditIndex.get(k2).push(idx);
+    });
+
+    const matchedPairs = [];
+    const pendingDebits = [];
+    const usedCreditIdx = new Set();
+
+    for (const d of debits) {
+      let foundIdx = null;
+      const keys = [
+        `${d.HelperKey1}_${Math.abs(Number(d.SignedAmount) || 0)}`,
+        `${d.HelperKey2}_${Math.abs(Number(d.SignedAmount) || 0)}`
+      ];
+      for (const k of keys) {
+        const arr = creditIndex.get(k);
+        if (arr && arr.length) {
+          const idx = arr.find(i => !usedCreditIdx.has(i));
+          if (idx !== undefined) {
+            foundIdx = idx;
+            break;
+          }
+        }
+      }
+      if (foundIdx !== null) {
+        usedCreditIdx.add(foundIdx);
+        matchedPairs.push({ debit: d, credit: credits[foundIdx] });
+      } else {
+        pendingDebits.push(d);
+      }
+    }
+
+    const pendingCredits = credits.filter((_, i) => !usedCreditIdx.has(i));
+
+    if (typeof setUploadedAll === 'function') setUploadedAll(collected);
+    if (typeof setUploadedAllDebits === 'function') setUploadedAllDebits(debits);
+    if (typeof setUploadedAllCredits === 'function') setUploadedAllCredits(credits);
+
+    setLastParseLog && .toISOString()} - ${file.name} parsed. rows=${collected.length} matches=${matchedPairs.length} pendingD=${pendingDebits.length} pendingC=${pendingCredits.length}`);
+    return { rows: collected, debits, credits, matchedPairs, pendingDebits, pendingCredits };
+  } catch (err) {
+    console.error('parseAllInOne error', err);
+    setLastParseLog && );
+    return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [] };
+  }
 }
 
 // --- END AUTO PATCH ---
