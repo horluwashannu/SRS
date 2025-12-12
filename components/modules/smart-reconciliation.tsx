@@ -571,13 +571,12 @@ export function SmartReconciliation({ userId }: Props) {
     return parseUploadedSheetWithMetadata(file);
   }
 
-/* ALL-IN-ONE PARSER — full, hardened, returns meta + proofTotal */
 async function parseAllInOne(file: File) {
   try {
     setUploadProgress(5);
 
-    const arrayBuffer = await file.arrayBuffer();
-    const workbook = XLSX.read(arrayBuffer, {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, {
       type: "array",
       cellDates: true,
       raw: false,
@@ -588,180 +587,136 @@ async function parseAllInOne(file: File) {
     let collectedMeta: any = {};
     let combinedProof = 0;
 
-    for (const sheetName of workbook.SheetNames || []) {
+    for (const sheetName of workbook.SheetNames) {
       const sheet = workbook.Sheets[sheetName];
       if (!sheet) continue;
 
-      // read grid mode so we can inspect labels/header/footer reliably
       const grid: any[] = XLSX.utils.sheet_to_json(sheet, {
         header: 1,
         defval: "",
-        blankrows: true,
+        blankrows: false,   // IMPORTANT FIX
       });
 
       if (!grid || grid.length === 0) continue;
 
-      // --- extract metadata from top (like single-sheet parser) ---
-      const tempMeta: any = {};
+      /* =======================
+         READ META TOP 50 ROWS
+         ======================= */
+      let tempMeta: any = {};
+
       for (let r = 0; r < Math.min(grid.length, 50); r++) {
         const row = grid[r] || [];
+
         for (let c = 0; c < row.length; c++) {
           const raw = row[c];
-          if (raw === null || raw === undefined) continue;
+          if (!raw) continue;
+
           const txt = String(raw).trim();
           if (!txt) continue;
+
           const norm = normalizeLabel(txt);
+
           for (const mk of Object.keys(META_KEY_MAP)) {
             const mkNorm = normalizeLabel(mk);
+
             if (norm === mkNorm || norm.includes(mkNorm) || mkNorm.includes(norm)) {
-              const valueCandidate = row[c + 1] ?? row[c + 2] ?? "";
+              const value = row[c + 1] ?? row[c + 2] ?? "";
               const field = META_KEY_MAP[mkNorm] ?? META_KEY_MAP[mk];
-              if (field) {
-                tempMeta[field] =
-                  valueCandidate === null || valueCandidate === undefined
-                    ? ""
-                    : String(valueCandidate).trim();
-              }
+              tempMeta[field] = String(value ?? "").trim();
             }
           }
         }
       }
-      // Merge meta (later sheets override earlier)
+
       collectedMeta = { ...collectedMeta, ...tempMeta };
 
-      // Also attempt to find inline system balance / proof total rows early
-      // (look for rows that have labels like 'SYSTEM BALANCE' or 'PROOF TOTAL' and read adjacent numeric)
-      for (let r = 0; r < Math.min(grid.length, 50); r++) {
-        const row = grid[r] || [];
-        const joined = row.map((c: any) => String(c ?? "").toUpperCase()).join(" ");
-        if (joined.includes("SYSTEM") && joined.includes("BALANCE")) {
-          // find numeric nearby
-          for (let c = 0; c < row.length; c++) {
-            const p = robustParseNumber(row[c]);
-            if (p && Number.isFinite(p.value) && p.original.trim() !== "") {
-              collectedMeta.SystemBalance = p.value;
-              break;
-            }
-          }
-        }
-        if (joined.includes("PROOF TOTAL") || joined.includes("PROOF_TOTAL")) {
-          for (let c = 0; c < row.length; c++) {
-            const p = robustParseNumber(row[c]);
-            if (p && Number.isFinite(p.value) && p.original.trim() !== "") {
-              collectedMeta.ProofTotal = p.value;
-              break;
-            }
-          }
-        }
-      }
-
-      // --- header detection (same approach as single-sheet parser) ---
-      let headerRowIndex: number | null = null;
-      let headerCols: { dateIdx: number; narrationIdx: number; amountIdx: number; ageIdx: number } | null = null;
+      /* =======================
+         FIND HEADER ROW
+         ======================= */
+      let headerRow = null;
+      let headerCols = null;
 
       for (let r = 0; r < Math.min(grid.length, 40); r++) {
         const row = grid[r] || [];
-        const txt = row.map((c: any) => String(c ?? "").toLowerCase()).join("|");
-        if (txt.includes("tran") && (txt.includes("narr") || txt.includes("narration")) && txt.includes("amount")) {
-          headerRowIndex = r;
+        const joined = row.join("|").toLowerCase();
+
+        if (
+          joined.includes("trn") &&
+          (joined.includes("narr") || joined.includes("description")) &&
+          joined.includes("amount")
+        ) {
+          headerRow = r;
+
           const lower = row.map((c: any) => String(c ?? "").toLowerCase());
-          const dateIdx = lower.findIndex((h: string) =>
-            h.includes("tran_date") || h.includes("tran date") || h.includes("transaction date") || h === "date" || h.includes("tran")
-          );
-          const narrationIdx = lower.findIndex((h: string) =>
-            h.includes("narr") || h.includes("description") || h.includes("narration") || h.includes("narrative")
-          );
-          const amountIdx = lower.findIndex((h: string) => h.includes("amount") || h.includes("amt"));
-          const ageIdx = lower.findIndex((h: string) => h.includes("age") || h.includes("days"));
+
           headerCols = {
-            dateIdx: dateIdx >= 0 ? dateIdx : 0,
-            narrationIdx: narrationIdx >= 0 ? narrationIdx : 1,
-            amountIdx: amountIdx >= 0 ? amountIdx : 2,
-            ageIdx: ageIdx >= 0 ? ageIdx : 3,
+            dateIdx: lower.findIndex((h) =>
+              h.includes("date") || h.includes("trn")
+            ),
+            narrationIdx: lower.findIndex((h) =>
+              h.includes("narr") || h.includes("description")
+            ),
+            amountIdx: lower.findIndex((h) =>
+              h.includes("amount") || h.includes("amt")
+            ),
+            ageIdx: lower.findIndex((h) =>
+              h.includes("age") || h.includes("days")
+            ),
           };
+
           break;
         }
       }
 
-      let dataStartRow = 8;
-      let mappingByHeader = false;
-      if (headerRowIndex !== null && headerCols !== null) {
-        dataStartRow = headerRowIndex + 1;
-        mappingByHeader = true;
-      } else {
-        if (grid.length < 9) dataStartRow = 0;
-      }
+      let startRow = headerRow !== null ? headerRow + 1 : 9;
+      if (grid.length < 9) startRow = 0;
 
-      // --- parse rows, skipping footers/meta rows ---
-      for (let r = dataStartRow; r < grid.length; r++) {
+      /* =======================
+         PARSE ROWS SAFELY
+         ======================= */
+      for (let r = startRow; r < grid.length; r++) {
         const row = grid[r] || [];
 
-        // create an uppercase joined version for label detection
-        const joinedUpper = row.map((c: any) => String(c ?? "").trim()).join(" ").toUpperCase();
+        const upper = row.map((x: any) => String(x ?? "").toUpperCase()).join(" ");
 
-        // skip explicit footer/meta lines
-        if (joinedUpper.includes("PROOF TOTAL") || joinedUpper.includes("PROOF_TOTAL") || joinedUpper.includes("SYSTEM BALANCE")) {
-          // also try to capture proof/system balance if adjacent number present
-          // (the earlier metadata scan should have caught most; this is an extra attempt)
-          for (let c = 0; c < row.length; c++) {
-            const p = robustParseNumber(row[c]);
-            if (p && Number.isFinite(p.value) && p.original.trim() !== "") {
-              if (joinedUpper.includes("SYSTEM BALANCE")) collectedMeta.SystemBalance = p.value;
-              if (joinedUpper.includes("PROOF TOTAL") || joinedUpper.includes("PROOF_TOTAL")) collectedMeta.ProofTotal = p.value;
-              break;
-            }
-          }
-          continue;
-        }
+        // STRICT FOOTER SKIP
+        if (/^PROOF TOTAL/i.test(upper)) continue;
+        if (/^SYSTEM BALANCE/i.test(upper)) continue;
+        if (/^DIFFERENCE/i.test(upper)) continue;
 
-        // skip rows that are clearly subtotal/total-only (no narration, label only or single 'TOTAL')
-        if (/^\s*TOTAL\s*$/i.test(joinedUpper) || joinedUpper === "TOTAL") {
-          continue;
-        }
+        /* Extract cells */
+        const rawDate =
+          headerCols && headerRow !== null ? row[headerCols.dateIdx] : row[0];
+        const rawNarr =
+          headerCols && headerRow !== null ? row[headerCols.narrationIdx] : row[1];
+        const rawAmt =
+          headerCols && headerRow !== null ? row[headerCols.amountIdx] : row[2];
+        const rawAge =
+          headerCols && headerRow !== null ? row[headerCols.ageIdx] : row[3];
 
-        const rawDate = mappingByHeader ? row[headerCols!.dateIdx] : row[0];
-        const rawNarr = mappingByHeader ? row[headerCols!.narrationIdx] : row[1];
-        const rawAmt = mappingByHeader ? row[headerCols!.amountIdx] : row[2];
-        const rawAge = mappingByHeader ? row[headerCols!.ageIdx] : row[3];
+        // Real row MUST have a narration + amount
+        if (!rawNarr || String(rawNarr).trim() === "") continue;
+        if (rawAmt === "" || rawAmt === null || rawAmt === undefined) continue;
 
-        // skip fully empty rows
-        if ([rawDate, rawNarr, rawAmt].every((v) => v === "" || v === null || v === undefined)) continue;
-
-        // defensive: skip rows where narration contains footer-like label even if amount present
-        const narrUpper = String(rawNarr ?? "").toUpperCase();
-        if (narrUpper.includes("SYSTEM BALANCE") || narrUpper.includes("PROOF TOTAL") || narrUpper.includes("PROOF_TOTAL")) {
-          // attempt to parse numeric and set meta
-          const fallbackNum = robustParseNumber(rawAmt);
-          if (fallbackNum && Number.isFinite(fallbackNum.value)) collectedMeta.ProofTotal = fallbackNum.value;
-          continue;
-        }
-
-        const parsedAmt = robustParseNumber(rawAmt);
-        const numeric = parsedAmt.value;
-
-        // if row looks like label-only (no narration) and amount is not a sensible transaction (e.g., the 'Original' is empty),
-        // skip — handled conservatively.
-        const narrationEmpty = !String(rawNarr ?? "").trim();
-        if (narrationEmpty && (!parsedAmt.original || String(parsedAmt.original).trim() === "")) {
-          // but if the row label includes words like 'PROOF' or 'SYSTEM', capture meta above; else skip noise
-          continue;
-        }
-
-        // now treat as transaction row — update proof total accumulator
-        combinedProof += numeric;
+        const amtParsed = robustParseNumber(rawAmt);
+        const numeric = amtParsed.value;
 
         const dateStr = excelDateToJS(rawDate);
-        const narrationClean = String(rawNarr ?? "").replace(/\s+/g, " ").trim();
-        const f15 = narrationClean.substring(0, 15).toUpperCase();
-        const l15 = narrationClean.slice(-15).toUpperCase();
+
+        const narrClean = String(rawNarr ?? "").replace(/\s+/g, " ").trim();
+
+        const f15 = narrClean.substring(0, 15).toUpperCase();
+        const l15 = narrClean.slice(-15).toUpperCase();
         const absAmt = Math.abs(numeric);
 
-        const rowObj: TransactionRow = {
+        combinedProof += numeric;
+
+        allRows.push({
           Date: dateStr || "",
-          Narration: String(rawNarr ?? ""),
-          OriginalAmount: parsedAmt.original,
+          Narration: narrClean,
+          OriginalAmount: amtParsed.original,
           SignedAmount: numeric,
-          IsNegative: parsedAmt.isNegative,
+          IsNegative: numeric < 0,
           Age: rawAge ?? undefined,
           First15: f15,
           Last15: l15,
@@ -769,42 +724,28 @@ async function parseAllInOne(file: File) {
           HelperKey2: `${l15}_${absAmt}`,
           __id: uid(),
           SheetName: sheetName,
-        };
-
-        rowObj.side = numeric < 0 ? "debit" : "credit";
-        rowObj.status = "pending";
-
-        allRows.push(rowObj);
+          side: numeric < 0 ? "debit" : "credit",
+          status: "pending",
+        });
       }
-    } // end sheets loop
+    }
 
-    // split into debits / credits
+    /* Split */
     const debits = allRows.filter((r) => r.SignedAmount < 0);
     const credits = allRows.filter((r) => r.SignedAmount >= 0);
-
-    // if we found a ProofTotal in meta, prefer that as result proofTotal; otherwise use combinedProof
-    const proofTotal = (collectedMeta && Number.isFinite(Number(collectedMeta.ProofTotal))) ? Number(collectedMeta.ProofTotal) : combinedProof;
-
-    // also ensure meta.SystemBalance is numeric if present
-    if (collectedMeta && collectedMeta.SystemBalance !== undefined) {
-      const sb = robustParseNumber(collectedMeta.SystemBalance);
-      if (Number.isFinite(sb.value)) collectedMeta.SystemBalance = sb.value;
-    }
 
     return {
       rows: allRows,
       debits,
       credits,
       meta: collectedMeta,
-      proofTotal,
-      sheetName: "All-In-One",
+      proofTotal: combinedProof,
     };
   } catch (err) {
-    console.error("ALL-IN-ONE ERROR:", err);
-    return { rows: [], debits: [], credits: [], meta: {}, proofTotal: 0, sheetName: "" };
+    console.error(err);
+    return { rows: [], debits: [], credits: [], meta: {}, proofTotal: 0 };
   }
 }
-
 
   /* match pairs */
  function matchPairs(
