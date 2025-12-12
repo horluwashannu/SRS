@@ -840,16 +840,46 @@ async function parseAllInOne(file: File) {
 
       if (mode === "all" && fileType === "all") {
         // parse all-in-one
-        const { rows, debits, credits, sheetName } = await parseAllInOne(file);
-        setUploadedAll(rows);
-        setUploadedAllDebits(debits);
-        setUploadedAllCredits(credits);
-        setAllFile(file);
-        setLastParseLog(`${new Date().toISOString()} - ${file.name}\nAll-in-one parsed. Debits: ${debits.length}, Credits: ${credits.length}`);
-        alert(`All-in-one parsed: D ${debits.length} • C ${credits.length}`);
-        return;
-      }
+         const { rows, debits, credits, meta, proofTotal } = await parseAllInOne(file);
 
+  setUploadedAll(rows);
+  setUploadedAllDebits(debits);
+  setUploadedAllCredits(credits);
+  setAllFile(file);
+
+  // APPLY META TO UI HEADER BOXES
+  applySheetMetaToHeader(meta);
+
+  // UPDATE PROOF TOTAL FOR ALL-IN-ONE
+  setSheetProofs(prev => ({
+    ...prev,
+    ["ALL-IN-ONE"]: {
+      matchedSum: 0,
+      itemCount: rows.length,
+      status: "pending",
+    }
+  }));
+
+  // SYSTEM BALANCE (only if provided and not locked)
+  if (meta.SystemBalance && !systemBalanceLocked) {
+    const s = robustParseNumber(meta.SystemBalance);
+    if (!isNaN(s.value)) {
+      setSystemBalanceInput(String(s.value));
+      setSystemBalance(s.value);
+    }
+  }
+
+  setLastParseLog(
+    `${new Date().toISOString()} - ${file.name}\n` +
+    `All-in-One parsed.\n` +
+    `Debits: ${debits.length}, Credits: ${credits.length}\n` +
+    `Proof Total: ${proofTotal}`
+  );
+
+  alert(`All-in-one parsed:\nDebits: ${debits.length}\nCredits: ${credits.length}`);
+
+  return;
+}
       const arrayBuffer = await file.arrayBuffer();
       const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true, raw: false, defval: "" });
 
