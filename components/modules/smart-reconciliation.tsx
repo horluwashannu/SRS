@@ -2599,11 +2599,13 @@ export type Sheet = { name: string; rows: ParsedRow[] };
       unmatchedB.push(r);
     }
   }
-  const unmatchedA = Array.from(mapA.values()).flat();
-
-function finalizeReconciliation(matches, mapA, unmatchedB) {
   
+  const unmatchedA = Array.from(mapA.values()).flat();
+  const unmatchedB = Array.from(mapB.values()).flat();
+
+  return { matches, unmatchedA, unmatchedB };
 }
+
 return { matches, unmatchedA, unmatchedB };
 }
 
