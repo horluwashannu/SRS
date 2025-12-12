@@ -2491,44 +2491,6 @@ function SelectableTableCompact({
 
 /* prevent refresh & keep-alive */
 
-export async function parseAllInOne(file: File) {
-  if (!file) return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [], log: "no file" };
-  try {
-    const data = await file.arrayBuffer();
-    const workbook = XLSX.read(data, { type: 'array', cellDates: true, raw: false, defval: '' });
-    const collected = [];
-    for (const sheetName of workbook.SheetNames || []) {
-      const ws = workbook.Sheets[sheetName]; if (!ws) continue;
-      const rawRows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-      for (const raw of rawRows) {
-        try { const row = normalizeRow(raw, sheetName); collected.push(row); } catch(e){ continue; }
-      }
-    }
-    const debits = collected.filter(r => r.AmountType === 'debit' || Number(r.SignedAmount) < 0);
-    const credits = collected.filter(r => r.AmountType === 'credit' || Number(r.SignedAmount) >= 0);
-    const creditIndex = new Map();
-    credits.forEach((c, idx) => {
-      const k1 = `${c.HelperKey1}_${Math.abs(Number(c.SignedAmount) || 0)}`;
-      const k2 = `${c.HelperKey2}_${Math.abs(Number(c.SignedAmount) || 0)}`;
-      if (!creditIndex.has(k1)) creditIndex.set(k1, []);
-      if (!creditIndex.has(k2)) creditIndex.set(k2, []);
-      creditIndex.get(k1).push(idx); creditIndex.get(k2).push(idx);
-    });
-    const matchedPairs = []; const pendingDebits = []; const usedCreditIdx = new Set();
-    for (const d of debits) {
-      let foundIdx = null;
-      const keys = [`${d.HelperKey1}_${Math.abs(Number(d.SignedAmount)||0)}`, `${d.HelperKey2}_${Math.abs(Number(d.SignedAmount)||0)}`];
-      for (const k of keys) {
-        const arr = creditIndex.get(k); if (arr && arr.length) { const idx = arr.find(i => !usedCreditIdx.has(i)); if (idx !== undefined) { foundIdx = idx; break; } }
-      }
-      if (foundIdx !== null) { usedCreditIdx.add(foundIdx); matchedPairs.push({ debit: d, credit: credits[foundIdx] }); } else pendingDebits.push(d);
-    }
-    const pendingCredits = credits.filter((_,i)=>!usedCreditIdx.has(i));
-    const log = `${new Date().toISOString()} parsed ${collected.length} rows, matches=${matchedPairs.length}, pendingD=${pendingDebits.length}, pendingC=${pendingCredits.length}`;
-    return { rows: collected, debits, credits, matchedPairs, pendingDebits, pendingCredits, log };
-  } catch (err) { console.error('parseAllInOne error', err); return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [], log: String(err) }; }
-}
-
 export default SmartReconciliation;
 
 /* ===== auto-added helpers BEGIN ===== */
