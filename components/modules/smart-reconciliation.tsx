@@ -574,50 +574,41 @@ export function SmartReconciliation({ userId }: Props) {
   /* For All-in-One: parse sheet and split debit/credit */
 async function parseAllInOne(file: File) {
   try {
-    setUploadProgress(5);
+    setUploadProgress(10);
 
-    const arrayBuffer = await file.arrayBuffer();
-    const wb = XLSX.read(arrayBuffer, {
-      type: "array",
-      cellDates: true,
-      raw: false,
-      defval: "",
-    });
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data, { type: "array", cellDates: true, raw: false, defval: "" });
 
-    let allRows: TransactionRow[] = [];
+    const allRows: TransactionRow[] = [];
 
-    // Process every sheet — same logic as “current” file parsing
-    for (const sheetName of wb.SheetNames) {
-      const ws = wb.Sheets[sheetName];
+    for (const sheetName of workbook.SheetNames) {
+      const ws = workbook.Sheets[sheetName];
       if (!ws) continue;
 
-      const jsonRows: any[] = XLSX.utils.sheet_to_json(ws, {
-        defval: "",
-        raw: false,
-      });
+      const jsonRows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false });
 
       for (const raw of jsonRows) {
         try {
-          const row = normalizeRow(raw, sheetName); // EXACT SAME LOGIC AS CURRENT MODE
+          // Use EXACT SAME LOGIC as current month upload
+          const row = normalizeRow(raw, sheetName);
+
+          // Ensure debit/credit side matches "current" logic
+          if (!row.side) {
+            row.side = row.SignedAmount < 0 ? "debit" : "credit";
+          }
+
           allRows.push(row);
-        } catch (e) {
-          console.warn("Skipping bad row", e);
+        } catch (err) {
+          console.warn("skip bad row", err);
         }
       }
     }
 
-    setUploadProgress(40);
+    setUploadProgress(80);
 
-    // Correct debit/credit split EXACT same logic as multi-mode logic
-    const debits = allRows.filter(
-      (r) =>
-        r.AmountType === "debit" || Number(r.SignedAmount) < 0
-    );
-
-    const credits = allRows.filter(
-      (r) =>
-        r.AmountType === "credit" || Number(r.SignedAmount) >= 0
-    );
+    // Same split logic as current-month mode
+    const debits = allRows.filter(r => r.SignedAmount < 0 || r.AmountType === "debit");
+    const credits = allRows.filter(r => r.SignedAmount >= 0 || r.AmountType === "credit");
 
     setUploadProgress(100);
 
@@ -625,50 +616,15 @@ async function parseAllInOne(file: File) {
       rows: allRows,
       debits,
       credits,
-      sheetName: "All-In-One",
+      sheetName: "All-In-One"
     };
+
   } catch (err) {
     console.error("parseAllInOne error:", err);
     return { rows: [], debits: [], credits: [], sheetName: "" };
   }
 }
-  /* auto knock */
-  function autoKnockOffWithinCurrent(rows: TransactionRow[]) {
-    const used = new Set<number>();
-    const knockedOff: TransactionRow[] = [];
-    for (let i = 0; i < rows.length; i++) {
-      if (used.has(i)) continue;
-      const a = rows[i];
-      const aAbs = Math.abs(a.SignedAmount ?? 0);
-      for (let j = i + 1; j < rows.length; j++) {
-        if (used.has(j)) continue;
-        const b = rows[j];
-        const bAbs = Math.abs(b.SignedAmount ?? 0);
-        if (aAbs !== bAbs) continue;
-        if ((a.SignedAmount ?? 0) * (b.SignedAmount ?? 0) >= 0) continue;
-        const aKey1 = `${a.HelperKey1}_${aAbs}`;
-        const aKey2 = `${a.HelperKey2}_${aAbs}`;
-        const bKey1 = `${b.HelperKey1}_${bAbs}`;
-        const bKey2 = `${b.HelperKey2}_${bAbs}`;
-        const match =
-          aKey1 === bKey1 ||
-          aKey1 === bKey2 ||
-          aKey2 === bKey1 ||
-          aKey2 === bKey2;
-        if (match) {
-          used.add(i);
-          used.add(j);
-          const aCopy = { ...a, status: "auto" as Status };
-          const bCopy = { ...b, status: "auto" as Status };
-          knockedOff.push(aCopy);
-          knockedOff.push(bCopy);
-          break;
-        }
-      }
-    }
-    const remaining: TransactionRow[] = rows.filter((_, idx) => !used.has(idx));
-    return { remaining, knockedOff };
-  }
+
 
   /* match pairs */
   function matchPairs(
