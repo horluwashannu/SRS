@@ -697,13 +697,16 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
       if (mode === "all" && fileType === "all") {
         // parse all-in-one
         const { rows, debits, credits, sheetName } = await parseAllInOne(file);
-        setUploadedAll(rows);
         setUploadedAllDebits(debits);
-        setUploadedAllCredits(credits);
-        setAllFile(file);
-        .toISOString()} - ${file.name}\nAll-in-one parsed. Debits: ${debits.length}, Credits: ${credits.length}`);
-        alert(`All-in-one parsed: D ${debits.length} • C ${credits.length}`);
-        return;
+setUploadedAllCredits(credits);
+setAllFile(file);
+
+setLastParseLog(
+  `${new Date().toISOString()} - ${file.name}\nAll-in-one parsed. Debits: ${debits.length}, Credits: ${credits.length}`
+);
+
+alert(`All-in-one parsed: D ${debits.length} • C ${credits.length}`);
+return;
       }
 
       const arrayBuffer = await file.arrayBuffer();
