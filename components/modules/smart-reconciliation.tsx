@@ -2762,6 +2762,7 @@ async function parseAllInOne(file: File) {
     return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [] };
   }
 }
+  const [darkMode, setDarkMode] = React.useState(false);
 
 
 // --- END AUTO PATCH ---
