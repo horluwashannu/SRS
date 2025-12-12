@@ -2706,15 +2706,30 @@ function normalizeRow(raw: any, sheetName: string): any {
 async function parseAllInOne(file: File) {
   // Option C: Use multi-mode parsing logic for every sheet, then auto-match debits vs credits
   if (!file) {
-    setLastParseLog && 
-    return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [] };
+  if (typeof setLastParseLog === "function") {
+    setLastParseLog("No file supplied for all-in-one parsing.");
   }
-  try {
-    const arrayBuffer = await file.arrayBuffer();
-    const workbook = (typeof XLSX !== 'undefined' ? XLSX : require('xlsx')).read(arrayBuffer, { type: 'array', cellDates: true, raw: false, defval: '' });
 
-    const collected = [];
+  return {
+    rows: [],
+    debits: [],
+    credits: [],
+    matchedPairs: [],
+    pendingDebits: [],
+    pendingCredits: []
+  };
+}
 
+try {
+  const arrayBuffer = await file.arrayBuffer();
+  const workbook =
+    (typeof XLSX !== "undefined" ? XLSX : require("xlsx")).read(
+      arrayBuffer,
+      { type: "array", cellDates: true, raw: false, defval: "" }
+    );
+
+  const collected = [];
+  
     for (const sheetName of workbook.SheetNames || []) {
       const ws = workbook.Sheets[sheetName];
       if (!ws) continue;
