@@ -2486,80 +2486,121 @@ function SelectableTableCompact({
 
 
 export async function parseAllInOne(file) {
-  if (!file) return { rows: [], debits: [], credits: [] };
-  try {
-    const data = await file.arrayBuffer();
-    const workbook = XLSX.read(data, { type: "array", cellDates: true, raw: false, defval: "" });
-    const collected = [];
-    for (const sheetName of workbook.SheetNames || []) {
-      const ws = workbook.Sheets[sheetName];
-      if (!ws) continue;
-      const rawRows = XLSX.utils.sheet_to_json(ws, { defval: "" });
-      for (const raw of rawRows) {
-        try {
-          const row = normalizeRow(raw, sheetName);
-          collected.push(row);
-        } catch(e){}
-      }
-    }
-    const debits = collected.filter(r => r.AmountType === "debit");
-    const credits = collected.filter(r => r.AmountType === "credit");
-    return { rows: collected, debits, credits };
-  } catch(e) {
-    console.error("parseAllInOne error", e);
-    return { rows: [], debits: [], credits: [] };
-  }
-}
-;
+  if (!file) return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [], sheetName: "" };
+
   try {
     const data = await file.arrayBuffer();
     const workbook = XLSX.read(data, { type: 'array', cellDates: true, raw: false, defval: '' });
+
     const collected = [];
+
     for (const sheetName of workbook.SheetNames || []) {
-      const ws = workbook.Sheets[sheetName]; if(!ws) continue;
+      const ws = workbook.Sheets[sheetName];
+      if (!ws) continue;
+
       const rawRows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
       for (const raw of rawRows) {
         try {
-          const row = (typeof normalizeRow === 'function') ? normalizeRow(raw, sheetName) : {
-            Date: excelDateToJS(raw?.Date ?? raw?.date ?? ''),
-            Narration: String(raw?.Narration ?? raw?.narr ?? '').trim(),
-            OriginalAmount: String(raw?.OriginalAmount ?? raw?.Amount ?? ''),
-            SignedAmount: Number(raw?.SignedAmount ?? raw?.Amount ?? 0),
-            IsNegative: Number(raw?.SignedAmount ?? raw?.Amount ?? 0) < 0,
-            AmountAbs: Math.abs(Number(raw?.SignedAmount ?? raw?.Amount ?? 0)),
-            AmountType: Number(raw?.SignedAmount ?? raw?.Amount ?? 0) < 0 ? 'debit' : 'credit',
-            First15: String((raw?.Narration ?? raw?.narr ?? '').slice(0,15)),
-            Last15: String((raw?.Narration ?? raw?.narr ?? '').slice(-15)),
-            HelperKey1: (String((raw?.Narration ?? raw?.narr ?? '').slice(0,15) + (raw?.Narration ?? raw?.narr ?? '').slice(-15))).toLowerCase(),
-            HelperKey2: String(Number(raw?.SignedAmount ?? raw?.Amount ?? 0)),
-            SheetName: sheetName,
-            __id: (typeof uid === 'function') ? uid() : Math.random().toString(36).slice(2,9)
-          };
+          const row = typeof normalizeRow === 'function'
+            ? normalizeRow(raw, sheetName)
+            : {
+                Date: excelDateToJS(raw?.Date ?? raw?.date ?? ''),
+                Narration: String(raw?.Narration ?? raw?.narr ?? '').trim(),
+                OriginalAmount: String(raw?.OriginalAmount ?? raw?.Amount ?? ''),
+                SignedAmount: Number(raw?.SignedAmount ?? raw?.Amount ?? 0),
+                IsNegative: Number(raw?.SignedAmount ?? raw?.Amount ?? 0) < 0,
+                AmountAbs: Math.abs(Number(raw?.SignedAmount ?? raw?.Amount ?? 0)),
+                AmountType: Number(raw?.SignedAmount ?? raw?.Amount ?? 0) < 0 ? 'debit' : 'credit',
+                First15: String((raw?.Narration ?? raw?.narr ?? '').slice(0, 15)),
+                Last15: String((raw?.Narration ?? raw?.narr ?? '').slice(-15)),
+                HelperKey1: (
+                  (raw?.Narration ?? raw?.narr ?? '').slice(0, 15) +
+                  (raw?.Narration ?? raw?.narr ?? '').slice(-15)
+                ).toLowerCase(),
+                HelperKey2: String(Number(raw?.SignedAmount ?? raw?.Amount ?? 0)),
+                SheetName: sheetName,
+                __id: typeof uid === 'function' ? uid() : Math.random().toString(36).slice(2, 9)
+              };
+
           collected.push(row);
-        } catch(e){ continue; }
+        } catch (e) {
+          continue;
+        }
       }
     }
+
     const debits = collected.filter(r => r.AmountType === 'debit' || Number(r.SignedAmount) < 0);
     const credits = collected.filter(r => r.AmountType === 'credit' || Number(r.SignedAmount) >= 0);
+
     const creditIndex = new Map();
     credits.forEach((c, idx) => {
       const k1 = `${c.HelperKey1}_${Math.abs(Number(c.SignedAmount) || 0)}`;
       const k2 = `${c.HelperKey2}_${Math.abs(Number(c.SignedAmount) || 0)}`;
+
       if (!creditIndex.has(k1)) creditIndex.set(k1, []);
       if (!creditIndex.has(k2)) creditIndex.set(k2, []);
-      creditIndex.get(k1).push(idx); creditIndex.get(k2).push(idx);
+
+      creditIndex.get(k1).push(idx);
+      creditIndex.get(k2).push(idx);
     });
-    const matchedPairs=[]; const pendingDebits=[]; const usedCreditIdx=new Set();
-    for(const d of debits){
-      let foundIdx=null;
-      const keys=[`${d.HelperKey1}_${Math.abs(Number(d.SignedAmount)||0)}`, `${d.HelperKey2}_${Math.abs(Number(d.SignedAmount)||0)}`];
-      for(const k of keys){ const arr=creditIndex.get(k); if(arr && arr.length){ const idx=arr.find(i=>!usedCreditIdx.has(i)); if(idx!==undefined){ foundIdx=idx; break; } } }
-      if(foundIdx!==null){ usedCreditIdx.add(foundIdx); matchedPairs.push({debit:d, credit:credits[foundIdx]}); } else pendingDebits.push(d);
+
+    const matchedPairs = [];
+    const pendingDebits = [];
+    const usedCreditIdx = new Set();
+
+    for (const d of debits) {
+      let foundIdx = null;
+
+      const keys = [
+        `${d.HelperKey1}_${Math.abs(Number(d.SignedAmount) || 0)}`,
+        `${d.HelperKey2}_${Math.abs(Number(d.SignedAmount) || 0)}`
+      ];
+
+      for (const k of keys) {
+        const arr = creditIndex.get(k);
+        if (arr && arr.length) {
+          const idx = arr.find(i => !usedCreditIdx.has(i));
+          if (idx !== undefined) {
+            foundIdx = idx;
+            break;
+          }
+        }
+      }
+
+      if (foundIdx !== null) {
+        usedCreditIdx.add(foundIdx);
+        matchedPairs.push({ debit: d, credit: credits[foundIdx] });
+      } else {
+        pendingDebits.push(d);
+      }
     }
-    const pendingCredits = credits.filter((_,i)=>!usedCreditIdx.has(i));
-    return { rows: collected, debits, credits, matchedPairs, pendingDebits, pendingCredits, sheetName: 'All-in-One' };
-  } catch(err){ console.error('parseAllInOne error', err); return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [], sheetName: '' }; }
-};
+
+    const pendingCredits = credits.filter((_, i) => !usedCreditIdx.has(i));
+
+    return {
+      rows: collected,
+      debits,
+      credits,
+      matchedPairs,
+      pendingDebits,
+      pendingCredits,
+      sheetName: "All-in-One"
+    };
+
+  } catch (err) {
+    console.error('parseAllInOne error', err);
+    return {
+      rows: [],
+      debits: [],
+      credits: [],
+      matchedPairs: [],
+      pendingDebits: [],
+      pendingCredits: [],
+      sheetName: ""
+    };
+  }
+}
 
 export default SmartReconciliation;
 
