@@ -2631,7 +2631,7 @@ export async function heavyParseServerSide(csvText: string, opts?: ParseOptions)
   return parseCSV(csvText, opts);
 }
 
-}
+
 /* ===== auto-added helpers END ===== */
 
 // --- AUTO PATCH: normalizeRow + parseAllInOne ---
