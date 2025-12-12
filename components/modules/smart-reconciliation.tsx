@@ -99,7 +99,7 @@ function robustParseNumber(input: any): { value: number; isNegative: boolean; or
     return { value: input, isNegative: input < 0, original: String(input) };
   }
 
-  const original = String(input).trim();
+   original = String(input).trim();
   // allow digits, signs, parentheses, comma, dot
   let s = original.replace(/[^0-9\-\(\)\.,+]/g, "").trim();
 
@@ -115,7 +115,7 @@ function robustParseNumber(input: any): { value: number; isNegative: boolean; or
     return { value: 0, isNegative: false, original };
   }
 
-  const num = Number.parseFloat(s);
+   num = Number.parseFloat(s);
   if (Number.isNaN(num)) {
     return { value: 0, isNegative, original };
   }
@@ -125,35 +125,35 @@ function robustParseNumber(input: any): { value: number; isNegative: boolean; or
 
 /* Absolute value helper */
 function amountAbsOf(x: any): number {
-  const parsed = robustParseNumber(x);
+   parsed = robustParseNumber(x);
   return Math.abs(parsed.value);
 }
 
 function excelDateToJS(value: any): string {
   if (value === undefined || value === null || value === "") return "";
   if (value instanceof Date && !isNaN(value.getTime())) {
-    const d = value;
-    const dd = String(d.getDate()).padStart(2, "0");
-    const mm = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
-    const yyyy = d.getFullYear();
+     d = value;
+     dd = String(d.getDate()).padStart(2, "0");
+     mm = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
+     yyyy = d.getFullYear();
     return `${dd}-${mm}-${yyyy}`;
   }
   if (typeof value === "number") {
     try {
-      const SSF = (XLSX as any).SSF;
-      const dt = SSF && SSF.parse_date_code ? SSF.parse_date_code(value) : null;
+       SSF = (XLSX as any).SSF;
+       dt = SSF && SSF.parse_date_code ? SSF.parse_date_code(value) : null;
       if (dt) {
-        const dd = String(dt.d).padStart(2, "0");
-        const mm = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][dt.m - 1];
-        const yyyy = dt.y;
+         dd = String(dt.d).padStart(2, "0");
+         mm = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][dt.m - 1];
+         yyyy = dt.y;
         return `${dd}-${mm}-${yyyy}`;
       }
-      const epoch = new Date(Date.UTC(1899, 11, 30));
-      const d = new Date(epoch.getTime() + value * 24 * 60 * 60 * 1000);
+       epoch = new Date(Date.UTC(1899, 11, 30));
+       d = new Date(epoch.getTime() + value * 24 * 60 * 60 * 1000);
       if (!isNaN(d.getTime())) {
-        const dd = String(d.getDate()).padStart(2, "0");
-        const mm = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
-        const yyyy = d.getFullYear();
+         dd = String(d.getDate()).padStart(2, "0");
+         mm = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
+         yyyy = d.getFullYear();
         return `${dd}-${mm}-${yyyy}`;
       }
     } catch (e) {
@@ -172,7 +172,7 @@ function normalizeLabel(s: string) {
   return s.replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
 
-const META_KEY_MAP: Record<string, string> = {
+ const META_KEY_MAP: Record<string, string> = {
   branchcode: "BranchCode",
   "branch code": "BranchCode",
   branchname: "BranchName",
@@ -195,46 +195,46 @@ const META_KEY_MAP: Record<string, string> = {
 /* Component */
 export function SmartReconciliation({ userId }: Props) {
   /* theme */
-  const [darkMode, setDarkMode] = useState<boolean>(false);
+   [darkMode, setDarkMode] = useState<boolean>(false);
 
   /* files */
-  const [prevFile, setPrevFile] = useState<File | null>(null);
-  const [currFile, setCurrFile] = useState<File | null>(null);
-  const [allFile, setAllFile] = useState<File | null>(null);
-  const fileInputPrevRef = useRef<HTMLInputElement | null>(null);
-  const fileInputCurrRef = useRef<HTMLInputElement | null>(null);
-  const fileInputAllRef = useRef<HTMLInputElement | null>(null);
+   [prevFile, setPrevFile] = useState<File | null>(null);
+   [currFile, setCurrFile] = useState<File | null>(null);
+   [allFile, setAllFile] = useState<File | null>(null);
+   fileInputPrevRef = useRef<HTMLInputElement | null>(null);
+   fileInputCurrRef = useRef<HTMLInputElement | null>(null);
+   fileInputAllRef = useRef<HTMLInputElement | null>(null);
 
   /* mode: 'multi' | 'one' | 'all' */
-  const [mode, setMode] = useState<'multi' | 'one' | 'all'>('multi');
+   [mode, setMode] = useState<'multi' | 'one' | 'all'>('multi');
 
   /* stored uploads (multi) */
-  const [uploadedPrevMulti, setUploadedPrevMulti] = useState<Array<{ sheet: string; rows: TransactionRow[]; proofTotal: number; meta: any; fileName?: string }>>([]);
-  const [uploadedCurrMulti, setUploadedCurrMulti] = useState<Array<{ sheet: string; rows: TransactionRow[]; proofTotal: number; meta: any; fileName?: string }>>([]);
+   [uploadedPrevMulti, setUploadedPrevMulti] = useState<Array<{ sheet: string; rows: TransactionRow[]; proofTotal: number; meta: any; fileName?: string }>>([]);
+   [uploadedCurrMulti, setUploadedCurrMulti] = useState<Array<{ sheet: string; rows: TransactionRow[]; proofTotal: number; meta: any; fileName?: string }>>([]);
 
   /* legacy single-sheet arrays  */
-  const [uploadedPrev, setUploadedPrev] = useState<TransactionRow[]>([]);
-  const [uploadedCurr, setUploadedCurr] = useState<TransactionRow[]>([]);
-  const [uploadedCurrRemaining, setUploadedCurrRemaining] = useState<TransactionRow[]>([]);
-  const [autoKnockedOffCurr, setAutoKnockedOffCurr] = useState<TransactionRow[]>([]);
+   [uploadedPrev, setUploadedPrev] = useState<TransactionRow[]>([]);
+   [uploadedCurr, setUploadedCurr] = useState<TransactionRow[]>([]);
+   [uploadedCurrRemaining, setUploadedCurrRemaining] = useState<TransactionRow[]>([]);
+   [autoKnockedOffCurr, setAutoKnockedOffCurr] = useState<TransactionRow[]>([]);
 
   /* all-in-one arrays */
-  const [uploadedAll, setUploadedAll] = useState<TransactionRow[]>([]);
-  const [uploadedAllDebits, setUploadedAllDebits] = useState<TransactionRow[]>([]);
-  const [uploadedAllCredits, setUploadedAllCredits] = useState<TransactionRow[]>([]);
+   [uploadedAll, setUploadedAll] = useState<TransactionRow[]>([]);
+   [uploadedAllDebits, setUploadedAllDebits] = useState<TransactionRow[]>([]);
+   [uploadedAllCredits, setUploadedAllCredits] = useState<TransactionRow[]>([]);
 
   /* parsing + logs */
-  const [uploadProgress, setUploadProgress] = useState<number>(0);
-  const [lastParseLog, setLastParseLog] = useState<string>("");
+   [uploadProgress, setUploadProgress] = useState<number>(0);
+   [lastParseLog, setLastParseLog] = useState<string>("");
 
   /* active sheets */
-  const [activePrevSheet, setActivePrevSheet] = useState<string | null>(null);
-  const [activeCurrSheet, setActiveCurrSheet] = useState<string | null>(null);
+   [activePrevSheet, setActivePrevSheet] = useState<string | null>(null);
+   [activeCurrSheet, setActiveCurrSheet] = useState<string | null>(null);
 
   /* sheet modal */
-  const [sheetSelectionModalOpen, setSheetSelectionModalOpen] = useState(false);
-  const [sheetCandidates, setSheetCandidates] = useState<Array<{ name: string; preview: any[]; fileName?: string }>>([]);
-  const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current" | null>(null);
+   [sheetSelectionModalOpen, setSheetSelectionModalOpen] = useState(false);
+   [sheetCandidates, setSheetCandidates] = useState<Array<{ name: string; preview: any[]; fileName?: string }>>([]);
+   [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current" | null>(null);
   const [selectedPrevSheets, setSelectedPrevSheets] = useState<string[]>([]);
   const [selectedCurrSheets, setSelectedCurrSheets] = useState<string[]>([]);
 
