@@ -765,16 +765,20 @@ return;
         setSheetProofs(prev => ({ ...prev, [accountName || file.name]: { matchedSum: 0, itemCount: rows.length, status: "pending" } }));
       }
 
-      .toISOString()} - ${file.name}\n${log}`);
-      alert(`${fileType === "previous" ? "Prev" : "Curr"} parsed (${rows.length} rows).`);
-    } catch (err: any) {
-      console.error("Upload/parse error:", err);
-      alert("Parse error");
-      );
-    } finally {
-      setUploadProgress(0);
-    }
-  };
+  setLastParseLog(
+      `${new Date().toISOString()} - ${file.name}\n${log}`
+    );
+
+    alert(
+      `${fileType === "previous" ? "Prev" : "Curr"} parsed (${rows.length} rows).`
+    );
+  } catch (err: any) {
+    console.error("Upload/parse error:", err);
+    alert("Parse error");
+  } finally {
+    setUploadProgress(0);
+  }
+};
 
   /* confirm sheet selection (multi) */
   const confirmSheetSelection = async () => {
