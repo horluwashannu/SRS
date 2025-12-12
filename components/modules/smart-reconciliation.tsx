@@ -195,46 +195,46 @@ function normalizeLabel(s: string) {
 /* Component */
 export function SmartReconciliation({ userId }: Props) {
   /* theme */
-   [darkMode, setDarkMode] = useState<boolean>(false);
+const [darkMode, setDarkMode] = useState<boolean>(false);
 
   /* files */
-   [prevFile, setPrevFile] = useState<File | null>(null);
-   [currFile, setCurrFile] = useState<File | null>(null);
-   [allFile, setAllFile] = useState<File | null>(null);
-   fileInputPrevRef = useRef<HTMLInputElement | null>(null);
-   fileInputCurrRef = useRef<HTMLInputElement | null>(null);
-   fileInputAllRef = useRef<HTMLInputElement | null>(null);
+const [prevFile, setPrevFile] = useState<File | null>(null);
+const [currFile, setCurrFile] = useState<File | null>(null);
+const [allFile, setAllFile] = useState<File | null>(null);
+const fileInputPrevRef = useRef<HTMLInputElement | null>(null);
+const fileInputCurrRef = useRef<HTMLInputElement | null>(null);
+const fileInputAllRef = useRef<HTMLInputElement | null>(null);
 
   /* mode: 'multi' | 'one' | 'all' */
-   [mode, setMode] = useState<'multi' | 'one' | 'all'>('multi');
+const [mode, setMode] = useState<'multi' | 'one' | 'all'>('multi');
 
   /* stored uploads (multi) */
-   [uploadedPrevMulti, setUploadedPrevMulti] = useState<Array<{ sheet: string; rows: TransactionRow[]; proofTotal: number; meta: any; fileName?: string }>>([]);
-   [uploadedCurrMulti, setUploadedCurrMulti] = useState<Array<{ sheet: string; rows: TransactionRow[]; proofTotal: number; meta: any; fileName?: string }>>([]);
+const [uploadedPrevMulti, setUploadedPrevMulti] = useState<Array<{ sheet: string; rows: TransactionRow[]; proofTotal: number; meta: any; fileName?: string }>>([]);
+const [uploadedCurrMulti, setUploadedCurrMulti] = useState<Array<{ sheet: string; rows: TransactionRow[]; proofTotal: number; meta: any; fileName?: string }>>([]);
 
   /* legacy single-sheet arrays  */
-   [uploadedPrev, setUploadedPrev] = useState<TransactionRow[]>([]);
-   [uploadedCurr, setUploadedCurr] = useState<TransactionRow[]>([]);
-   [uploadedCurrRemaining, setUploadedCurrRemaining] = useState<TransactionRow[]>([]);
-   [autoKnockedOffCurr, setAutoKnockedOffCurr] = useState<TransactionRow[]>([]);
+const [uploadedPrev, setUploadedPrev] = useState<TransactionRow[]>([]);
+const [uploadedCurr, setUploadedCurr] = useState<TransactionRow[]>([]);
+const [uploadedCurrRemaining, setUploadedCurrRemaining] = useState<TransactionRow[]>([]);
+const [autoKnockedOffCurr, setAutoKnockedOffCurr] = useState<TransactionRow[]>([]);
 
   /* all-in-one arrays */
-   [uploadedAll, setUploadedAll] = useState<TransactionRow[]>([]);
-   [uploadedAllDebits, setUploadedAllDebits] = useState<TransactionRow[]>([]);
-   [uploadedAllCredits, setUploadedAllCredits] = useState<TransactionRow[]>([]);
+const [uploadedAll, setUploadedAll] = useState<TransactionRow[]>([]);
+const [uploadedAllDebits, setUploadedAllDebits] = useState<TransactionRow[]>([]);
+const [uploadedAllCredits, setUploadedAllCredits] = useState<TransactionRow[]>([]);
 
   /* parsing + logs */
-   [uploadProgress, setUploadProgress] = useState<number>(0);
-   [lastParseLog, setLastParseLog] = useState<string>("");
+const [uploadProgress, setUploadProgress] = useState<number>(0);
+const [lastParseLog, setLastParseLog] = useState<string>("");
 
   /* active sheets */
-   [activePrevSheet, setActivePrevSheet] = useState<string | null>(null);
-   [activeCurrSheet, setActiveCurrSheet] = useState<string | null>(null);
+const [activePrevSheet, setActivePrevSheet] = useState<string | null>(null);
+const [activeCurrSheet, setActiveCurrSheet] = useState<string | null>(null);
 
   /* sheet modal */
-   [sheetSelectionModalOpen, setSheetSelectionModalOpen] = useState(false);
-   [sheetCandidates, setSheetCandidates] = useState<Array<{ name: string; preview: any[]; fileName?: string }>>([]);
-   [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current" | null>(null);
+const [sheetSelectionModalOpen, setSheetSelectionModalOpen] = useState(false);
+const [sheetCandidates, setSheetCandidates] = useState<Array<{ name: string; preview: any[]; fileName?: string }>>([]);
+const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current" | null>(null);
   const [selectedPrevSheets, setSelectedPrevSheets] = useState<string[]>([]);
   const [selectedCurrSheets, setSelectedCurrSheets] = useState<string[]>([]);
 
@@ -2484,6 +2484,58 @@ function SelectableTableCompact({
 
 /* prevent refresh & keep-alive */
 
+export async function parseAllInOne(file: File) {
+  if (!file) return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [], sheetName: "" };
+  try {
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data, { type: 'array', cellDates: true, raw: false, defval: '' });
+    const collected = [];
+    for (const sheetName of workbook.SheetNames || []) {
+      const ws = workbook.Sheets[sheetName]; if(!ws) continue;
+      const rawRows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      for (const raw of rawRows) {
+        try {
+          const row = (typeof normalizeRow === 'function') ? normalizeRow(raw, sheetName) : {
+            Date: excelDateToJS(raw?.Date ?? raw?.date ?? ''),
+            Narration: String(raw?.Narration ?? raw?.narr ?? '').trim(),
+            OriginalAmount: String(raw?.OriginalAmount ?? raw?.Amount ?? ''),
+            SignedAmount: Number(raw?.SignedAmount ?? raw?.Amount ?? 0),
+            IsNegative: Number(raw?.SignedAmount ?? raw?.Amount ?? 0) < 0,
+            AmountAbs: Math.abs(Number(raw?.SignedAmount ?? raw?.Amount ?? 0)),
+            AmountType: Number(raw?.SignedAmount ?? raw?.Amount ?? 0) < 0 ? 'debit' : 'credit',
+            First15: String((raw?.Narration ?? raw?.narr ?? '').slice(0,15)),
+            Last15: String((raw?.Narration ?? raw?.narr ?? '').slice(-15)),
+            HelperKey1: (String((raw?.Narration ?? raw?.narr ?? '').slice(0,15) + (raw?.Narration ?? raw?.narr ?? '').slice(-15))).toLowerCase(),
+            HelperKey2: String(Number(raw?.SignedAmount ?? raw?.Amount ?? 0)),
+            SheetName: sheetName,
+            __id: (typeof uid === 'function') ? uid() : Math.random().toString(36).slice(2,9)
+          };
+          collected.push(row);
+        } catch(e){ continue; }
+      }
+    }
+    const debits = collected.filter(r => r.AmountType === 'debit' || Number(r.SignedAmount) < 0);
+    const credits = collected.filter(r => r.AmountType === 'credit' || Number(r.SignedAmount) >= 0);
+    const creditIndex = new Map();
+    credits.forEach((c, idx) => {
+      const k1 = `${c.HelperKey1}_${Math.abs(Number(c.SignedAmount) || 0)}`;
+      const k2 = `${c.HelperKey2}_${Math.abs(Number(c.SignedAmount) || 0)}`;
+      if (!creditIndex.has(k1)) creditIndex.set(k1, []);
+      if (!creditIndex.has(k2)) creditIndex.set(k2, []);
+      creditIndex.get(k1).push(idx); creditIndex.get(k2).push(idx);
+    });
+    const matchedPairs=[]; const pendingDebits=[]; const usedCreditIdx=new Set();
+    for(const d of debits){
+      let foundIdx=null;
+      const keys=[`${d.HelperKey1}_${Math.abs(Number(d.SignedAmount)||0)}`, `${d.HelperKey2}_${Math.abs(Number(d.SignedAmount)||0)}`];
+      for(const k of keys){ const arr=creditIndex.get(k); if(arr && arr.length){ const idx=arr.find(i=>!usedCreditIdx.has(i)); if(idx!==undefined){ foundIdx=idx; break; } } }
+      if(foundIdx!==null){ usedCreditIdx.add(foundIdx); matchedPairs.push({debit:d, credit:credits[foundIdx]}); } else pendingDebits.push(d);
+    }
+    const pendingCredits = credits.filter((_,i)=>!usedCreditIdx.has(i));
+    return { rows: collected, debits, credits, matchedPairs, pendingDebits, pendingCredits, sheetName: 'All-in-One' };
+  } catch(err){ console.error('parseAllInOne error', err); return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [], sheetName: '' }; }
+}
+
 export default SmartReconciliation;
 
 /* ===== auto-added helpers BEGIN ===== */
@@ -2608,7 +2660,7 @@ function reconcileRows(
   }
 
   // Process B
-  const unmatchedB: ParsedRow[] = [];
+  const unmatchedB = [];
   for (const r of rowsB) {
     const n = normalizeAmount(r[amountColB] as any);
     (r as any).__amount = n;
@@ -2630,7 +2682,6 @@ function reconcileRows(
 export async function heavyParseServerSide(csvText: string, opts?: ParseOptions) {
   return parseCSV(csvText, opts);
 }
-
 
 /* ===== auto-added helpers END ===== */
 
@@ -2659,110 +2710,5 @@ function normalizeRow(raw: any, sheetName: string): any {
     __id: uid(),
   };
 }
-
-async function parseAllInOne(file: File) {
-  // Option C: Use multi-mode parsing logic for every sheet, then auto-match debits vs credits
-  if (!file) {
-    setLastParseLog && setLastParseLog("No file provided to parseAllInOne");
-    return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [] };
-  }
-  try {
-    const arrayBuffer = await file.arrayBuffer();
-    const workbook = (typeof XLSX !== 'undefined' ? XLSX : require('xlsx')).read(arrayBuffer, { type: 'array', cellDates: true, raw: false, defval: '' });
-
-    const collected = [];
-
-    for (const sheetName of workbook.SheetNames || []) {
-      const ws = workbook.Sheets[sheetName];
-      if (!ws) continue;
-      const rawRows = (typeof XLSX !== 'undefined' ? XLSX : require('xlsx')).utils.sheet_to_json(ws, { defval: '' });
-      for (const raw of rawRows) {
-        try {
-          const row = (typeof normalizeRow === 'function') ? normalizeRow(raw, sheetName) : (function(){
-            const parsed = (typeof robustParseNumber === 'function') ? robustParseNumber(raw?.Amount ?? raw?.amount ?? raw?.OriginalAmount) : { value: Number(raw?.Amount || 0), isNegative: Number(raw?.Amount||0) < 0, original: String(raw?.Amount||'') };
-            const numericAmount = parsed.value || 0;
-            const narration = String(raw?.Narration || raw?.Narr || '').trim();
-            return {
-              Date: (typeof excelDateToJS === 'function') ? excelDateToJS(raw?.Date) : String(raw?.Date ?? ''),
-              Narration: narration,
-              OriginalAmount: parsed.original,
-              SignedAmount: numericAmount,
-              IsNegative: parsed.isNegative,
-              AmountAbs: Math.abs(numericAmount),
-              AmountType: numericAmount < 0 ? 'debit' : 'credit',
-              First15: narration.slice(0,15),
-              Last15: narration.slice(-15),
-              HelperKey1: (narration.slice(0,15) + narration.slice(-15)).toLowerCase(),
-              HelperKey2: String(numericAmount),
-              SheetName: sheetName,
-              __id: (typeof uid === 'function') ? uid() : Math.random().toString(36).slice(2,9)
-            };
-          })();
-          collected.push(row);
-        } catch (e) {
-          console.warn('parseAllInOne: skipping row', e);
-        }
-      }
-    }
-
-    // split debit/credit
-    const debits = collected.filter(r => (r.AmountType === 'debit') || (Number(r.SignedAmount) < 0));
-    const credits = collected.filter(r => (r.AmountType === 'credit') || (Number(r.SignedAmount) >= 0));
-
-    // auto-match logic: try to match by HelperKey1/HelperKey2 + AmountAbs
-    const creditIndex = new Map();
-    credits.forEach((c, idx) => {
-      const k1 = `${c.HelperKey1}_${Math.abs(Number(c.SignedAmount) || 0)}`;
-      const k2 = `${c.HelperKey2}_${Math.abs(Number(c.SignedAmount) || 0)}`;
-      if (!creditIndex.has(k1)) creditIndex.set(k1, []);
-      if (!creditIndex.has(k2)) creditIndex.set(k2, []);
-      creditIndex.get(k1).push(idx);
-      creditIndex.get(k2).push(idx);
-    });
-
-    const matchedPairs = [];
-    const pendingDebits = [];
-    const usedCreditIdx = new Set();
-
-    for (const d of debits) {
-      let foundIdx = null;
-      const keys = [
-        `${d.HelperKey1}_${Math.abs(Number(d.SignedAmount) || 0)}`,
-        `${d.HelperKey2}_${Math.abs(Number(d.SignedAmount) || 0)}`
-      ];
-      for (const k of keys) {
-        const arr = creditIndex.get(k);
-        if (arr && arr.length) {
-          const idx = arr.find(i => !usedCreditIdx.has(i));
-          if (idx !== undefined) {
-            foundIdx = idx;
-            break;
-          }
-        }
-      }
-      if (foundIdx !== null) {
-        usedCreditIdx.add(foundIdx);
-        matchedPairs.push({ debit: d, credit: credits[foundIdx] });
-      } else {
-        pendingDebits.push(d);
-      }
-    }
-
-    const pendingCredits = credits.filter((_, i) => !usedCreditIdx.has(i));
-
-    if (typeof setUploadedAll === 'function') setUploadedAll(collected);
-    if (typeof setUploadedAllDebits === 'function') setUploadedAllDebits(debits);
-    if (typeof setUploadedAllCredits === 'function') setUploadedAllCredits(credits);
-
-    setLastParseLog && setLastParseLog(`${new Date().toISOString()} - ${file.name} parsed. rows=${collected.length} matches=${matchedPairs.length} pendingD=${pendingDebits.length} pendingC=${pendingCredits.length}`);
-    return { rows: collected, debits, credits, matchedPairs, pendingDebits, pendingCredits };
-  } catch (err) {
-    console.error('parseAllInOne error', err);
-    setLastParseLog && setLastParseLog('parseAllInOne error: ' + String(err?.message ?? err));
-    return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [] };
-  }
-}
-  const [darkMode, setDarkMode] = React.useState(false);
-
 
 // --- END AUTO PATCH ---
