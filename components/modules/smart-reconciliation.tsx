@@ -572,62 +572,44 @@ export function SmartReconciliation({ userId }: Props) {
   }
 
   /* For All-in-One: parse sheet and split debit/credit */
-/* For All-in-One: parse sheet and split debit/credit using CURRENT-MONTH logic */
 async function parseAllInOne(file: File) {
   try {
     setUploadProgress(10);
 
-    const data = await file.arrayBuffer();
-    const workbook = XLSX.read(data, {
-      type: "array",
-      cellDates: true,
-      raw: false,
-      defval: ""
-    });
+    const buffer = await file.arrayBuffer();
+    const wb = XLSX.read(buffer, { type: "array", cellDates: true, raw: false, defval: "" });
 
     const allRows: TransactionRow[] = [];
 
-    for (const sheetName of workbook.SheetNames) {
-      const ws = workbook.Sheets[sheetName];
+    for (const sheetName of wb.SheetNames) {
+      const ws = wb.Sheets[sheetName];
       if (!ws) continue;
 
-      // always use JSON parsing (same as current-mode)
-      const jsonRows: any[] = XLSX.utils.sheet_to_json(ws, {
-        raw: false,
-        defval: ""
-      });
+      // IMPORTANT: use normal object-JSON mode EXACTLY like current-month parsing
+      const jsonRows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false });
 
       for (const raw of jsonRows) {
         try {
-          // EXACT same logic as current file parsing
+          // Use the SAME normalizeRow as current-month upload
           const row = normalizeRow(raw, sheetName);
 
-          // Ensure debit/credit assignment matches current-mode
-          row.side =
-            row.side ||
-            (row.SignedAmount < 0 ? "debit" : "credit");
+          // Ensure debit/credit side consistent
+          if (!row.side) {
+            row.side = row.SignedAmount < 0 ? "debit" : "credit";
+          }
 
           allRows.push(row);
         } catch (err) {
-          console.warn("Skipping invalid row:", err);
+          console.warn("AIO: skip row", err);
         }
       }
     }
 
     setUploadProgress(70);
 
-    // Split like current mode
-    const debits = allRows.filter(
-      r => r.side === "debit" || r.SignedAmount < 0
-    );
-
-    const credits = allRows.filter(
-      r => r.side === "credit" || r.SignedAmount >= 0
-    );
-
-    // Now run auto-matching
-    const { matchedPairs, pendingDebits, pendingCredits } =
-      matchPairs(debits, credits);
+    // Same splitting logic as normal parsing
+    const debits = allRows.filter(r => r.SignedAmount < 0 || r.AmountType === "debit");
+    const credits = allRows.filter(r => r.SignedAmount >= 0 || r.AmountType === "credit");
 
     setUploadProgress(100);
 
@@ -635,26 +617,13 @@ async function parseAllInOne(file: File) {
       rows: allRows,
       debits,
       credits,
-      matchedPairs,
-      pendingDebits,
-      pendingCredits,
-      sheetName: "All-In-One"
+      sheetName: "All-In-One",
     };
   } catch (err) {
     console.error("parseAllInOne error:", err);
-    return {
-      rows: [],
-      debits: [],
-      credits: [],
-      matchedPairs: [],
-      pendingDebits: [],
-      pendingCredits: [],
-      sheetName: ""
-    };
+    return { rows: [], debits: [], credits: [], sheetName: "" };
   }
 }
-
-
   /* match pairs */
  function matchPairs(
   debits: TransactionRow[],
