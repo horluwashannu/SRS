@@ -40,7 +40,6 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 
 import { getSupabaseClient } from "@/lib/supabase";
-function uid(): string { return Math.random().toString(36).slice(2, 9); }
 
 /* Types */
 type Side = "debit" | "credit";
@@ -52,9 +51,6 @@ interface TransactionRow {
   OriginalAmount: string;
   SignedAmount: number;
   IsNegative: boolean;
-  AmountAbs: number;
-  AmountType: "debit" | "credit";
-
   Age?: string | number;
   First15: string;
   Last15: string;
@@ -88,72 +84,47 @@ interface Props {
 }
 
 /* Utilities (short names) */
-
-/* Utilities (short names) */
 function robustParseNumber(input: any): { value: number; isNegative: boolean; original: string } {
-  if (input === undefined || input === null) {
-    return { value: 0, isNegative: false, original: "" };
-  }
-
-  if (typeof input === "number") {
-    return { value: input, isNegative: input < 0, original: String(input) };
-  }
-
-   original = String(input).trim();
-  // allow digits, signs, parentheses, comma, dot
-  let s = original.replace(/[^0-9\-\(\)\.,+]/g, "").trim();
-
+  if (input === undefined || input === null) return { value: 0, isNegative: false, original: "" };
+  if (typeof input === "number") return { value: input, isNegative: input < 0, original: String(input) };
+  let original = String(input).trim();
+  let s = original.replace(/[^0-9\-\(\)\.,]/g, "").trim();
   let isNegative = false;
   if (s.startsWith("(") && s.endsWith(")")) {
     isNegative = true;
     s = "-" + s.slice(1, -1);
   }
-
-  // remove grouping commas
   s = s.replace(/,/g, "");
-  if (s === "" || s === "-" || s === "-.") {
-    return { value: 0, isNegative: false, original };
-  }
-
-   num = Number.parseFloat(s);
-  if (Number.isNaN(num)) {
-    return { value: 0, isNegative, original };
-  }
-
+  if (s === "" || s === "-") return { value: 0, isNegative: false, original };
+  const num = Number.parseFloat(s);
+  if (Number.isNaN(num)) return { value: 0, isNegative, original };
   return { value: num, isNegative: isNegative || num < 0, original };
-}
-
-/* Absolute value helper */
-function amountAbsOf(x: any): number {
-   parsed = robustParseNumber(x);
-  return Math.abs(parsed.value);
 }
 
 function excelDateToJS(value: any): string {
   if (value === undefined || value === null || value === "") return "";
   if (value instanceof Date && !isNaN(value.getTime())) {
-     d = value;
-     dd = String(d.getDate()).padStart(2, "0");
-     mm = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
-     yyyy = d.getFullYear();
+    const d = value;
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
+    const yyyy = d.getFullYear();
     return `${dd}-${mm}-${yyyy}`;
   }
   if (typeof value === "number") {
     try {
-       SSF = (XLSX as any).SSF;
-       dt = SSF && SSF.parse_date_code ? SSF.parse_date_code(value) : null;
+      const dt = (XLSX as any).SSF && (XLSX as any).SSF.parse_date_code ? (XLSX as any).SSF.parse_date_code(value) : null;
       if (dt) {
-         dd = String(dt.d).padStart(2, "0");
-         mm = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][dt.m - 1];
-         yyyy = dt.y;
+        const dd = String(dt.d).padStart(2, "0");
+        const mm = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][dt.m - 1];
+        const yyyy = dt.y;
         return `${dd}-${mm}-${yyyy}`;
       }
-       epoch = new Date(Date.UTC(1899, 11, 30));
-       d = new Date(epoch.getTime() + value * 24 * 60 * 60 * 1000);
+      const epoch = new Date(Date.UTC(1899, 11, 30));
+      const d = new Date(epoch.getTime() + value * 24 * 60 * 60 * 1000);
       if (!isNaN(d.getTime())) {
-         dd = String(d.getDate()).padStart(2, "0");
-         mm = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
-         yyyy = d.getFullYear();
+        const dd = String(d.getDate()).padStart(2, "0");
+        const mm = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
+        const yyyy = d.getFullYear();
         return `${dd}-${mm}-${yyyy}`;
       }
     } catch (e) {
@@ -172,7 +143,7 @@ function normalizeLabel(s: string) {
   return s.replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
 
- const META_KEY_MAP: Record<string, string> = {
+const META_KEY_MAP: Record<string, string> = {
   branchcode: "BranchCode",
   "branch code": "BranchCode",
   branchname: "BranchName",
@@ -192,49 +163,55 @@ function normalizeLabel(s: string) {
   clco: "Clco",
 };
 
+function uid() {
+  return Math.random().toString(36).slice(2, 9);
+}
+
+const LS_KEY = "smart_recon_session_v4";
+
 /* Component */
 export function SmartReconciliation({ userId }: Props) {
   /* theme */
-const [darkMode, setDarkMode] = useState<boolean>(false);
+  const [darkMode, setDarkMode] = useState<boolean>(false);
 
   /* files */
-const [prevFile, setPrevFile] = useState<File | null>(null);
-const [currFile, setCurrFile] = useState<File | null>(null);
-const [allFile, setAllFile] = useState<File | null>(null);
-const fileInputPrevRef = useRef<HTMLInputElement | null>(null);
-const fileInputCurrRef = useRef<HTMLInputElement | null>(null);
-const fileInputAllRef = useRef<HTMLInputElement | null>(null);
+  const [prevFile, setPrevFile] = useState<File | null>(null);
+  const [currFile, setCurrFile] = useState<File | null>(null);
+  const [allFile, setAllFile] = useState<File | null>(null);
+  const fileInputPrevRef = useRef<HTMLInputElement | null>(null);
+  const fileInputCurrRef = useRef<HTMLInputElement | null>(null);
+  const fileInputAllRef = useRef<HTMLInputElement | null>(null);
 
   /* mode: 'multi' | 'one' | 'all' */
-const [mode, setMode] = useState<'multi' | 'one' | 'all'>('multi');
+  const [mode, setMode] = useState<'multi' | 'one' | 'all'>('multi');
 
   /* stored uploads (multi) */
-const [uploadedPrevMulti, setUploadedPrevMulti] = useState<Array<{ sheet: string; rows: TransactionRow[]; proofTotal: number; meta: any; fileName?: string }>>([]);
-const [uploadedCurrMulti, setUploadedCurrMulti] = useState<Array<{ sheet: string; rows: TransactionRow[]; proofTotal: number; meta: any; fileName?: string }>>([]);
+  const [uploadedPrevMulti, setUploadedPrevMulti] = useState<Array<{ sheet: string; rows: TransactionRow[]; proofTotal: number; meta: any; fileName?: string }>>([]);
+  const [uploadedCurrMulti, setUploadedCurrMulti] = useState<Array<{ sheet: string; rows: TransactionRow[]; proofTotal: number; meta: any; fileName?: string }>>([]);
 
   /* legacy single-sheet arrays  */
-const [uploadedPrev, setUploadedPrev] = useState<TransactionRow[]>([]);
-const [uploadedCurr, setUploadedCurr] = useState<TransactionRow[]>([]);
-const [uploadedCurrRemaining, setUploadedCurrRemaining] = useState<TransactionRow[]>([]);
-const [autoKnockedOffCurr, setAutoKnockedOffCurr] = useState<TransactionRow[]>([]);
+  const [uploadedPrev, setUploadedPrev] = useState<TransactionRow[]>([]);
+  const [uploadedCurr, setUploadedCurr] = useState<TransactionRow[]>([]);
+  const [uploadedCurrRemaining, setUploadedCurrRemaining] = useState<TransactionRow[]>([]);
+  const [autoKnockedOffCurr, setAutoKnockedOffCurr] = useState<TransactionRow[]>([]);
 
   /* all-in-one arrays */
-const [uploadedAll, setUploadedAll] = useState<TransactionRow[]>([]);
-const [uploadedAllDebits, setUploadedAllDebits] = useState<TransactionRow[]>([]);
-const [uploadedAllCredits, setUploadedAllCredits] = useState<TransactionRow[]>([]);
+  const [uploadedAll, setUploadedAll] = useState<TransactionRow[]>([]);
+  const [uploadedAllDebits, setUploadedAllDebits] = useState<TransactionRow[]>([]);
+  const [uploadedAllCredits, setUploadedAllCredits] = useState<TransactionRow[]>([]);
 
   /* parsing + logs */
-const [uploadProgress, setUploadProgress] = useState<number>(0);
-const [lastParseLog, setLastParseLog] = useState<string>("");
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [lastParseLog, setLastParseLog] = useState<string>("");
 
   /* active sheets */
-const [activePrevSheet, setActivePrevSheet] = useState<string | null>(null);
-const [activeCurrSheet, setActiveCurrSheet] = useState<string | null>(null);
+  const [activePrevSheet, setActivePrevSheet] = useState<string | null>(null);
+  const [activeCurrSheet, setActiveCurrSheet] = useState<string | null>(null);
 
   /* sheet modal */
-const [sheetSelectionModalOpen, setSheetSelectionModalOpen] = useState(false);
-const [sheetCandidates, setSheetCandidates] = useState<Array<{ name: string; preview: any[]; fileName?: string }>>([]);
-const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current" | null>(null);
+  const [sheetSelectionModalOpen, setSheetSelectionModalOpen] = useState(false);
+  const [sheetCandidates, setSheetCandidates] = useState<Array<{ name: string; preview: any[]; fileName?: string }>>([]);
+  const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current" | null>(null);
   const [selectedPrevSheets, setSelectedPrevSheets] = useState<string[]>([]);
   const [selectedCurrSheets, setSelectedCurrSheets] = useState<string[]>([]);
 
@@ -387,7 +364,7 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
     const arrayBuffer = await file.arrayBuffer();
     setUploadProgress(15);
 
-    const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true, raw: true, defval: "" });
+    const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true, raw: false, defval: "" });
     setUploadProgress(25);
 
     if (!workbook || !workbook.SheetNames || workbook.SheetNames.length === 0) {
@@ -559,8 +536,6 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
         OriginalAmount: parsedAmount.original,
         SignedAmount: numericAmount,
         IsNegative: parsedAmount.isNegative,
-        AmountAbs: Math.abs(numericAmount),
-        AmountType: (numericAmount < 0 ? "debit" : "credit"),
         Age: rawAgeCandidate ?? undefined,
         First15: first15,
         Last15: last15,
@@ -585,7 +560,7 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
   }
 
   async function parseSpecificSheetFromWorkbookBuffer(buffer: ArrayBuffer, sheetName: string, fileNameHint = "sheet_extract.xlsx") {
-    const wb: XLSX.WorkBook = XLSX.read(buffer, { type: "array", cellDates: true, raw: true, defval: "" });
+    const wb: XLSX.WorkBook = XLSX.read(buffer, { type: "array", cellDates: true, raw: false, defval: "" });
     if (!wb.Sheets || !wb.Sheets[sheetName]) {
       throw new Error("Sheet not found");
     }
@@ -597,7 +572,112 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
   }
 
   /* For All-in-One: parse sheet and split debit/credit */
-  
+  async function parseAllInOne(file: File) {
+    setUploadProgress(5);
+    const arrayBuffer = await file.arrayBuffer();
+    setUploadProgress(15);
+    const wb = XLSX.read(arrayBuffer, { type: "array", cellDates: true, raw: false, defval: "" });
+    setUploadProgress(25);
+    const sheetName = wb.SheetNames[0];
+    const sheet = wb.Sheets[sheetName];
+    const rawRows: any[] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", blankrows: true });
+    // find header
+    let headerRowIndex = 0;
+    let header: string[] = [];
+    for (let r = 0; r < Math.min(rawRows.length, 20); r++) {
+      const row = rawRows[r] || [];
+      const joined = row.map((c: any) => String(c ?? "").toLowerCase()).join("|");
+      if (joined.includes("date") && (joined.includes("amount") || joined.includes("amt"))) {
+        headerRowIndex = r;
+        header = (row || []).map((c: any) => String(c ?? ""));
+        break;
+      }
+    }
+    if (!header || header.length === 0) {
+      // fallback: assume first row is header
+      header = (rawRows[0] || []).map((c: any) => String(c ?? ""));
+      headerRowIndex = 0;
+    }
+    const lowerHeader = header.map(h => String(h).toLowerCase());
+    const dateIdx = lowerHeader.findIndex(h => h.includes("date"));
+    const narrIdx = lowerHeader.findIndex(h => h.includes("narr") || h.includes("desc") || h.includes("description"));
+    const amtIdx = lowerHeader.findIndex(h => h.includes("amount") || h.includes("amt"));
+    // detect side column
+    const sideIdxCandidates = ["side", "type", "dr", "dr/cr", "drcr", "debit", "credit", "debit/credit", "sign", "dc"];
+    let sideIdx = -1;
+    for (let i = 0; i < lowerHeader.length; i++) {
+      const h = lowerHeader[i];
+      for (const cand of sideIdxCandidates) {
+        if (h.includes(cand)) {
+          sideIdx = i;
+          break;
+        }
+      }
+      if (sideIdx !== -1) break;
+    }
+    // parse rows
+    const parsedRows: TransactionRow[] = [];
+    for (let r = headerRowIndex + 1; r < rawRows.length; r++) {
+      const row = rawRows[r] || [];
+      const rawDate = row[dateIdx] ?? "";
+      const rawNarr = row[narrIdx] ?? row.slice(1, Math.min(4, row.length)).join(" ") ?? "";
+      const rawAmt = row[amtIdx] ?? row[row.length - 1] ?? "";
+      const parsedAmt = robustParseNumber(rawAmt);
+      const num = parsedAmt.value;
+      const dateStr = excelDateToJS(rawDate);
+      const narrationClean = String(rawNarr ?? "").replace(/\s+/g, " ").trim();
+      const first15 = narrationClean.substring(0, 15).toUpperCase().trim();
+      const last15 = narrationClean.slice(-15).toUpperCase().trim();
+      const absAmount = Math.abs(num);
+      const helper1 = `${first15}_${absAmount}`;
+      const helper2 = `${last15}_${absAmount}`;
+      const newRow: TransactionRow = {
+        Date: dateStr || "",
+        Narration: String(rawNarr ?? ""),
+        OriginalAmount: parsedAmt.original,
+        SignedAmount: num,
+        IsNegative: parsedAmt.isNegative,
+        First15: first15,
+        Last15: last15,
+        HelperKey1: helper1,
+        HelperKey2: helper2,
+        __id: uid(),
+        SheetName: sheetName,
+      };
+      // determine side
+      let side: Side | null = null;
+      if (sideIdx >= 0) {
+        const v = String(row[sideIdx] ?? "").toLowerCase().trim();
+        if (v) {
+          if (v.includes("dr") || v.includes("debit") || v === "d") side = "debit";
+          if (v.includes("cr") || v.includes("credit") || v === "c") side = "credit";
+          if (v.includes("debit") && v.includes("credit")) side = null;
+          if (v.includes("-") && !side) {
+            // nothing
+          }
+        }
+      }
+      if (!side) {
+        // fall back to sign
+        if (num < 0) side = "debit";
+        else side = "credit";
+      }
+      newRow.side = side;
+      newRow.status = "pending";
+      parsedRows.push(newRow);
+    }
+    setUploadProgress(60);
+    // split
+    const debits = parsedRows.filter(r => r.side === "debit");
+    const credits = parsedRows.filter(r => r.side === "credit");
+    setUploadProgress(100);
+    return {
+      rows: parsedRows,
+      debits,
+      credits,
+      sheetName,
+    };
+  }
 
   /* auto knock */
   function autoKnockOffWithinCurrent(rows: TransactionRow[]) {
@@ -606,11 +686,11 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
     for (let i = 0; i < rows.length; i++) {
       if (used.has(i)) continue;
       const a = rows[i];
-      const aAbs = amountAbsOf(a);
+      const aAbs = Math.abs(a.SignedAmount ?? 0);
       for (let j = i + 1; j < rows.length; j++) {
         if (used.has(j)) continue;
         const b = rows[j];
-        const bAbs = amountAbsOf(b);
+        const bAbs = Math.abs(b.SignedAmount ?? 0);
         if (aAbs !== bAbs) continue;
         if ((a.SignedAmount ?? 0) * (b.SignedAmount ?? 0) >= 0) continue;
         const aKey1 = `${a.HelperKey1}_${aAbs}`;
@@ -648,8 +728,8 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
   } {
     const creditIndex = new Map<string, number[]>();
     credits.forEach((c, idx) => {
-      const k1 = `${c.HelperKey1}_${amountAbsOf(c)}`;
-      const k2 = `${c.HelperKey2}_${amountAbsOf(c)}`;
+      const k1 = `${c.HelperKey1}_${Math.abs(c.SignedAmount ?? 0)}`;
+      const k2 = `${c.HelperKey2}_${Math.abs(c.SignedAmount ?? 0)}`;
       if (!creditIndex.has(k1)) creditIndex.set(k1, []);
       if (!creditIndex.has(k2)) creditIndex.set(k2, []);
       creditIndex.get(k1)!.push(idx);
@@ -661,8 +741,8 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
     for (const d of debits) {
       let foundIdx: number | null = null;
       const keysToTry = [
-        `${d.HelperKey1}_${amountAbsOf(d)}`,
-        `${d.HelperKey2}_${amountAbsOf(d)}`
+        `${d.HelperKey1}_${Math.abs(d.SignedAmount ?? 0)}`,
+        `${d.HelperKey2}_${Math.abs(d.SignedAmount ?? 0)}`
       ];
       for (const k of keysToTry) {
         const arr = creditIndex.get(k);
@@ -689,8 +769,8 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
   const handleFileUpload = async (file: File, fileType: "previous" | "current" | "all") => {
     try {
       setUploadProgress(2);
-      if (!file.name.match(/.(xlsx|xls)$/i)) {
-        alert("Please upload xlsx/.xls");
+      if (!file.name.match(/\.(xlsx|xls)$/i)) {
+        alert("Please upload .xlsx/.xls");
         return;
       }
 
@@ -707,7 +787,7 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
       }
 
       const arrayBuffer = await file.arrayBuffer();
-      const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true, raw: true, defval: "" });
+      const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true, raw: false, defval: "" });
 
       if (mode === "multi" && workbook.SheetNames && workbook.SheetNames.length > 1) {
         const candidates = workbook.SheetNames.map((s) => {
@@ -892,13 +972,13 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
   const computePendingSumForSheet = (sheetName?: string) => {
     if (!sheetName) return 0;
     const rowsForSheet = resultRows.filter(r => r.SheetName === sheetName && (r.status === "pending"));
-    const sum = rowsForSheet.reduce((acc, r) => acc + amountAbsOf(r), 0);
+    const sum = rowsForSheet.reduce((acc, r) => acc + Math.abs(r.SignedAmount ?? 0), 0);
     return sum;
   };
 
   const computePendingSumAll = () => {
     const rows = resultRows.filter(r => r.status === "pending");
-    const sum = rows.reduce((acc, r) => acc + amountAbsOf(r), 0);
+    const sum = rows.reduce((acc, r) => acc + Math.abs(r.SignedAmount ?? 0), 0);
     return sum;
   };
 
@@ -906,14 +986,14 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
     if (!sheetName) return { matchedCount: 0, matchedAmount: 0 };
     const rowsForSheet = resultRows.filter(r => r.SheetName === sheetName && (r.status === "matched" || r.status === "auto"));
     const matchedCount = rowsForSheet.length;
-    const matchedAmount = rowsForSheet.reduce((acc, r) => acc + amountAbsOf(r), 0) / 2;
+    const matchedAmount = rowsForSheet.reduce((acc, r) => acc + Math.abs(r.SignedAmount ?? 0), 0) / 2;
     return { matchedCount, matchedAmount };
   };
 
   const computeMatchedSummaryAll = () => {
     const rows = resultRows.filter(r => r.status === "matched" || r.status === "auto");
     const matchedCount = rows.length;
-    const matchedAmount = rows.reduce((acc, r) => acc + amountAbsOf(r), 0) / 2;
+    const matchedAmount = rows.reduce((acc, r) => acc + Math.abs(r.SignedAmount ?? 0), 0) / 2;
     return { matchedCount, matchedAmount };
   };
 
@@ -956,7 +1036,7 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
         ...finalPendingCredits.map((r) => ({ ...r, status: "pending" as const, side: "credit" as const, SheetName: currBlock.sheet })),
       ];
 
-      const matchedSum = allMatchedPairs.reduce((acc, p) => acc + amountAbsOf(p.debit), 0);
+      const matchedSum = allMatchedPairs.reduce((acc, p) => acc + Math.abs(p.debit.SignedAmount ?? 0), 0);
 
       const resultsWithMeta = results.map(row => ({
         ...row,
@@ -1065,7 +1145,7 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
         ...finalPendingCredits.map((r) => ({ ...r, status: "pending" as const, side: "credit" as const })),
       ];
 
-      const matchedSum = allMatchedPairs.reduce((acc, p) => acc + amountAbsOf(p.debit), 0);
+      const matchedSum = allMatchedPairs.reduce((acc, p) => acc + Math.abs(p.debit.SignedAmount ?? 0), 0);
 
       const resultsWithMeta = results.map((row) => ({
         ...row,
@@ -1162,7 +1242,7 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
         ...finalPendingCredits.map((r) => ({ ...r, status: "pending" as const, side: "credit" as const })),
       ];
 
-      const matchedSum = allMatchedPairs.reduce((acc, p) => acc + amountAbsOf(p.debit), 0);
+      const matchedSum = allMatchedPairs.reduce((acc, p) => acc + Math.abs(p.debit.SignedAmount ?? 0), 0);
 
       const resultsWithMeta = results.map(row => ({
         ...row,
@@ -1420,19 +1500,19 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
   /* manual match helpers */
   const getPendingAmounts = () => {
     const amounts = new Set<number>();
-    pendingDebits.forEach((d) => amounts.add(amountAbsOf(d)));
-    pendingCredits.forEach((c) => amounts.add(amountAbsOf(c)));
+    pendingDebits.forEach((d) => amounts.add(Math.abs(d.SignedAmount ?? 0)));
+    pendingCredits.forEach((c) => amounts.add(Math.abs(c.SignedAmount ?? 0)));
     return Array.from(amounts).sort((a, b) => a - b);
   };
 
   const filteredPendingDebits = useMemo(() => {
     if (amountFilter === "all") return pendingDebits;
-    return pendingDebits.filter((d) => amountAbsOf(d) === Number(amountFilter));
+    return pendingDebits.filter((d) => Math.abs(d.SignedAmount ?? 0) === Number(amountFilter));
   }, [pendingDebits, amountFilter]);
 
   const filteredPendingCredits = useMemo(() => {
     if (amountFilter === "all") return pendingCredits;
-    return pendingCredits.filter((c) => amountAbsOf(c) === Number(amountFilter));
+    return pendingCredits.filter((c) => Math.abs(c.SignedAmount ?? 0) === Number(amountFilter));
   }, [pendingCredits, amountFilter]);
 
   const manualMatchSelected = async () => {
@@ -1452,8 +1532,8 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
       return;
     }
 
-    const debCandidates = pendingDebits.filter((d) => amountAbsOf(d) === amt && String(d.Narration || "").toUpperCase().includes(matchStr));
-    const credCandidates = pendingCredits.filter((c) => amountAbsOf(c) === amt && String(c.Narration || "").toUpperCase().includes(matchStr));
+    const debCandidates = pendingDebits.filter((d) => Math.abs(d.SignedAmount ?? 0) === amt && String(d.Narration || "").toUpperCase().includes(matchStr));
+    const credCandidates = pendingCredits.filter((c) => Math.abs(c.SignedAmount ?? 0) === amt && String(c.Narration || "").toUpperCase().includes(matchStr));
 
     if (debCandidates.length === 0 || credCandidates.length === 0) {
       alert("No matching rows.");
@@ -1670,7 +1750,7 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
               <TableRow key={row.__id ?? idx} className="text-xs">
                 <TableCell className="font-medium text-foreground py-1">{row.Date}</TableCell>
                 <TableCell className="max-w-[360px] text-foreground whitespace-nowrap overflow-hidden text-ellipsis py-1" title={row.Narration}>{row.Narration}</TableCell>
-                <TableCell className="text-right font-mono text-foreground py-1">₦{formatDisplayNumber(amountAbsOf(row))}</TableCell>
+                <TableCell className="text-right font-mono text-foreground py-1">₦{formatDisplayNumber(Math.abs(row.SignedAmount))}</TableCell>
                 <TableCell className="py-1"><Badge variant={row.status === "auto" ? "destructive" : row.status === "matched" ? "success" : "secondary"}>{row.status ?? "—"}</Badge></TableCell>
               </TableRow>
             ))}
@@ -1918,7 +1998,7 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
                   <Upload className="mb-2 h-5 w-5 text-muted-foreground" />
                   <span className="text-sm font-medium">{allFile ? allFile.name : "Click to upload"}</span>
                   <span className="mt-1 text-xs text-muted-foreground">.xlsx/.xls</span>
-                  <input type="file" className="hidden" accept=".xlsx,xls" ref={fileInputAllRef} onChange={(e) => e.target.files?.[0] && (setAllFile(e.target.files[0]), handleFileUpload(e.target.files[0], "all"))} />
+                  <input type="file" className="hidden" accept=".xlsx,.xls" ref={fileInputAllRef} onChange={(e) => e.target.files?.[0] && (setAllFile(e.target.files[0]), handleFileUpload(e.target.files[0], "all"))} />
                 </label>
 
                 <div className="mt-3">
@@ -1969,7 +2049,7 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
                   <Upload className="mb-2 h-5 w-5 text-muted-foreground" />
                   <span className="text-sm font-medium">{prevFile ? prevFile.name : "Click to upload"}</span>
                   <span className="mt-1 text-xs text-muted-foreground">.xlsx/.xls</span>
-                  <input type="file" className="hidden" accept=".xlsx,xls" ref={fileInputPrevRef} onChange={(e) => e.target.files?.[0] && (setPrevFile(e.target.files[0]), handleFileUpload(e.target.files[0], "previous"))} />
+                  <input type="file" className="hidden" accept=".xlsx,.xls" ref={fileInputPrevRef} onChange={(e) => e.target.files?.[0] && (setPrevFile(e.target.files[0]), handleFileUpload(e.target.files[0], "previous"))} />
                 </label>
 
                 <div className="mt-3 flex gap-2 items-center">
@@ -2046,7 +2126,7 @@ const [sheetSelectionFor, setSheetSelectionFor] = useState<"previous" | "current
                   <Upload className="mb-2 h-5 w-5 text-muted-foreground" />
                   <span className="text-sm font-medium">{currFile ? currFile.name : "Click to upload"}</span>
                   <span className="mt-1 text-xs text-muted-foreground">.xlsx/.xls</span>
-                  <input type="file" className="hidden" accept=".xlsx,xls" ref={fileInputCurrRef} onChange={(e) => e.target.files?.[0] && (setCurrFile(e.target.files[0]), handleFileUpload(e.target.files[0], "current"))} />
+                  <input type="file" className="hidden" accept=".xlsx,.xls" ref={fileInputCurrRef} onChange={(e) => e.target.files?.[0] && (setCurrFile(e.target.files[0]), handleFileUpload(e.target.files[0], "current"))} />
                 </label>
 
                 <div className="mt-3">
@@ -2471,7 +2551,7 @@ function SelectableTableCompact({
                 <TableCell className="py-1"><Checkbox checked={selectedRows.has(globalIndex)} onCheckedChange={() => toggleRow(globalIndex)} /></TableCell>
                 <TableCell className="font-medium text-foreground py-1">{row.Date}</TableCell>
                 <TableCell className="max-w-[360px] text-foreground whitespace-nowrap overflow-hidden text-ellipsis py-1" title={row.Narration}>{row.Narration}</TableCell>
-                <TableCell className="text-right font-mono text-foreground py-1">₦{formatDisplayNumber(amountAbsOf(row))}</TableCell>
+                <TableCell className="text-right font-mono text-foreground py-1">₦{formatDisplayNumber(Math.abs(row.SignedAmount))}</TableCell>
                 <TableCell className="py-1"><Badge variant={row.status === "auto" ? "destructive" : row.status === "matched" ? "success" : "secondary"}>{row.status}</Badge></TableCell>
               </TableRow>
             );
@@ -2483,298 +2563,34 @@ function SelectableTableCompact({
 }
 
 /* prevent refresh & keep-alive */
-
-
-export async function parseAllInOne(file) {
-  if (!file) return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [], sheetName: "" };
-
-  try {
-    const data = await file.arrayBuffer();
-    const workbook = XLSX.read(data, { type: 'array', cellDates: true, raw: false, defval: '' });
-
-    const collected = [];
-
-    for (const sheetName of workbook.SheetNames || []) {
-      const ws = workbook.Sheets[sheetName];
-      if (!ws) continue;
-
-      const rawRows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-
-      for (const raw of rawRows) {
-        try {
-          const row = typeof normalizeRow === 'function'
-            ? normalizeRow(raw, sheetName)
-            : {
-                Date: excelDateToJS(raw?.Date ?? raw?.date ?? ''),
-                Narration: String(raw?.Narration ?? raw?.narr ?? '').trim(),
-                OriginalAmount: String(raw?.OriginalAmount ?? raw?.Amount ?? ''),
-                SignedAmount: Number(raw?.SignedAmount ?? raw?.Amount ?? 0),
-                IsNegative: Number(raw?.SignedAmount ?? raw?.Amount ?? 0) < 0,
-                AmountAbs: Math.abs(Number(raw?.SignedAmount ?? raw?.Amount ?? 0)),
-                AmountType: Number(raw?.SignedAmount ?? raw?.Amount ?? 0) < 0 ? 'debit' : 'credit',
-                First15: String((raw?.Narration ?? raw?.narr ?? '').slice(0, 15)),
-                Last15: String((raw?.Narration ?? raw?.narr ?? '').slice(-15)),
-                HelperKey1: (
-                  (raw?.Narration ?? raw?.narr ?? '').slice(0, 15) +
-                  (raw?.Narration ?? raw?.narr ?? '').slice(-15)
-                ).toLowerCase(),
-                HelperKey2: String(Number(raw?.SignedAmount ?? raw?.Amount ?? 0)),
-                SheetName: sheetName,
-                __id: typeof uid === 'function' ? uid() : Math.random().toString(36).slice(2, 9)
-              };
-
-          collected.push(row);
-        } catch (e) {
-          continue;
-        }
-      }
+if (typeof window !== "undefined") {
+  document.addEventListener("keydown", function (e) {
+    if (
+      e.key === "F5" ||
+      (e.ctrlKey && e.key.toLowerCase() === "r") ||
+      (e.metaKey && e.key.toLowerCase() === "r")
+    ) {
+      e.preventDefault();
+      alert("Refresh disabled.");
     }
+  });
 
-    const debits = collected.filter(r => r.AmountType === 'debit' || Number(r.SignedAmount) < 0);
-    const credits = collected.filter(r => r.AmountType === 'credit' || Number(r.SignedAmount) >= 0);
+  window.addEventListener("beforeunload", function (e) {
+    e.preventDefault();
+    e.returnValue = "";
+  });
 
-    const creditIndex = new Map();
-    credits.forEach((c, idx) => {
-      const k1 = `${c.HelperKey1}_${Math.abs(Number(c.SignedAmount) || 0)}`;
-      const k2 = `${c.HelperKey2}_${Math.abs(Number(c.SignedAmount) || 0)}`;
+  let lastPing = Date.now();
+  const keepAlive = setInterval(() => {
+    // heartbeat
+    lastPing = Date.now();
+    window.__smartReconKeepAlive = { lastPing };
+  }, 1000 * 60);
 
-      if (!creditIndex.has(k1)) creditIndex.set(k1, []);
-      if (!creditIndex.has(k2)) creditIndex.set(k2, []);
-
-      creditIndex.get(k1).push(idx);
-      creditIndex.get(k2).push(idx);
+  ["mousemove", "keydown", "click"].forEach((evt) => {
+    window.addEventListener(evt, () => {
+      lastPing = Date.now();
     });
-
-    const matchedPairs = [];
-    const pendingDebits = [];
-    const usedCreditIdx = new Set();
-
-    for (const d of debits) {
-      let foundIdx = null;
-
-      const keys = [
-        `${d.HelperKey1}_${Math.abs(Number(d.SignedAmount) || 0)}`,
-        `${d.HelperKey2}_${Math.abs(Number(d.SignedAmount) || 0)}`
-      ];
-
-      for (const k of keys) {
-        const arr = creditIndex.get(k);
-        if (arr && arr.length) {
-          const idx = arr.find(i => !usedCreditIdx.has(i));
-          if (idx !== undefined) {
-            foundIdx = idx;
-            break;
-          }
-        }
-      }
-
-      if (foundIdx !== null) {
-        usedCreditIdx.add(foundIdx);
-        matchedPairs.push({ debit: d, credit: credits[foundIdx] });
-      } else {
-        pendingDebits.push(d);
-      }
-    }
-
-    const pendingCredits = credits.filter((_, i) => !usedCreditIdx.has(i));
-
-    return {
-      rows: collected,
-      debits,
-      credits,
-      matchedPairs,
-      pendingDebits,
-      pendingCredits,
-      sheetName: "All-in-One"
-    };
-
-  } catch (err) {
-    console.error('parseAllInOne error', err);
-    return {
-      rows: [],
-      debits: [],
-      credits: [],
-      matchedPairs: [],
-      pendingDebits: [],
-      pendingCredits: [],
-      sheetName: ""
-    };
-  }
+  });
 }
-
 export default SmartReconciliation;
-
-/* ===== auto-added helpers BEGIN ===== */
-export type AmountNormalization = {
-  OriginalAmount: string | number;
-  SignedAmount: number;
-  AmountAbs: number;
-  AmountType: "debit" | "credit" | "unknown";
-};
-
-export function normalizeAmount(input: string | number | null | undefined): AmountNormalization {
-  const OriginalAmount = input === null || input === undefined ? "" : input;
-  try {
-    if (typeof input === "number") {
-      const SignedAmount = Number(input);
-      const AmountAbs = Math.abs(SignedAmount);
-      const AmountType = SignedAmount < 0 ? "debit" : (SignedAmount > 0 ? "credit" : "unknown");
-      return { OriginalAmount, SignedAmount, AmountAbs, AmountType };
-    }
-    let s = String(input).trim();
-    s = s.replace(/[\u00A0\s]+/g, "");
-    s = s.replace(/[^0-9().,+-]/g, "");
-    let negative = false;
-    if (/^(.*)$/.test(s)) {
-      negative = true;
-      s = s.replace(/^(|)$/g, "");
-    }
-    s = s.replace(/[, ]+/g, "");
-    const n = Number(s);
-    const SignedAmount = Number.isFinite(n) ? (negative ? -n : n) : 0;
-    const AmountAbs = Math.abs(SignedAmount);
-    const AmountType = SignedAmount < 0 ? "debit" : (SignedAmount > 0 ? "credit" : "unknown");
-    return { OriginalAmount, SignedAmount, AmountAbs, AmountType };
-  } catch (e) {
-    return { OriginalAmount, SignedAmount: 0, AmountAbs: 0, AmountType: "unknown" };
-  }
-}
-
-export type ParsedRow = Record<string, string | number | null>;
-export type ParseOptions = { hasHeader?: boolean; delimiter?: string; maxRows?: number; };
-
-function stripFormula(value: string): string {
-  if (typeof value !== "string") return value;
-  if (value.startsWith("=") && !value.startsWith("==")) {
-    return value.slice(1);
-  }
-  return value;
-}
-
-export function parseCSV(text: string, opts?: ParseOptions): { header: string[]; rows: ParsedRow[] } {
-  const options = { hasHeader: true, delimiter: ",", maxRows: 200000, ...(opts || {}) };
-  const delim = options.delimiter!;
-  const lines = text.split(/\r?\n/);
-  const safeLines = lines.slice(0, options.maxRows).filter(l => l.length > 0);
-  const rows: string[][] = [];
-  for (const line of safeLines) {
-    const row: string[] = [];
-    let cur = "";
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') {
-        if (inQuotes && line[i+1] === '"') { cur += '"'; i++; continue; }
-        inQuotes = !inQuotes;
-        continue;
-      }
-      if (!inQuotes && ch === delim) {
-        row.push(stripFormula(cur));
-        cur = "";
-        continue;
-      }
-      cur += ch;
-    }
-    row.push(stripFormula(cur));
-    rows.push(row);
-  }
-  let header: string[] = [];
-  const parsed: ParsedRow[] = [];
-  if (options.hasHeader && rows.length > 0) {
-    header = rows[0].map((h, idx) => (h && String(h).trim().length > 0 ? String(h).trim() : `col_${idx+1}`));
-    for (let i = 1; i < rows.length; i++) {
-      const r = rows[i];
-      const obj: ParsedRow = {};
-      for (let j = 0; j < header.length; j++) {
-        obj[header[j]] = (j < r.length ? (r[j] === "" ? null : r[j]) : null);
-      }
-      parsed.push(obj);
-    }
-  } else {
-    const maxCols = rows.length > 0 ? Math.max(...rows.map(r => r.length)) : 0;
-    header = Array.from({length: maxCols}, (_,i)=>`col_${i+1}`);
-    for (const r of rows) {
-      const obj: ParsedRow = {};
-      for (let j = 0; j < header.length; j++) {
-        obj[header[j]] = (j < r.length ? (r[j] === "" ? null : r[j]) : null);
-      }
-      parsed.push(obj);
-    }
-  }
-  return { header, rows: parsed };
-}
-
-export type Sheet = { name: string; rows: ParsedRow[] };
-
-function reconcileRows(
-  rowsA: ParsedRow[],
-  rowsB: ParsedRow[],
-  amountColA: string,
-  amountColB: string
-) {
-  const mapA = new Map<number, ParsedRow[]>();
-  const matches: { left: ParsedRow; right: ParsedRow }[] = [];
-
-  // Build mapA (group A rows by absolute amount)
-  for (const r of rowsA) {
-    const n = normalizeAmount(r[amountColA] as any);
-    (r as any).__amount = n;
-
-    const key = n.AmountAbs;
-    if (!mapA.has(key)) mapA.set(key, []);
-    mapA.get(key)!.push(r);
-  }
-
-  // Process B
-  const unmatchedB = [];
-  for (const r of rowsB) {
-    const n = normalizeAmount(r[amountColB] as any);
-    (r as any).__amount = n;
-
-    const candidates = mapA.get(n.AmountAbs);
-    if (candidates && candidates.length > 0) {
-      matches.push({ left: candidates.shift()!, right: r });
-    } else {
-      unmatchedB.push(r);
-    }
-  }
-
-  // Remaining unmatched A rows
-  const unmatchedA = Array.from(mapA.values()).flat();
-
-  return { matches, unmatchedA, unmatchedB };
-}
-
-export async function heavyParseServerSide(csvText: string, opts?: ParseOptions) {
-  return parseCSV(csvText, opts);
-}
-
-/* ===== auto-added helpers END ===== */
-
-// --- AUTO PATCH: normalizeRow + parseAllInOne ---
-
-function normalizeRow(raw: any, sheetName: string): any {
-  const { value, isNegative, original } = robustParseNumber(raw?.Amount);
-  const numericAmount = value ?? 0;
-  const narration = String(raw?.Narration || "").trim();
-  const first15 = narration.slice(0, 15);
-  const last15 = narration.slice(-15);
-
-  return {
-    Date: excelDateToJS(raw?.Date),
-    Narration: narration,
-    OriginalAmount: original,
-    SignedAmount: numericAmount,
-    IsNegative: isNegative,
-    AmountAbs: Math.abs(numericAmount),
-    AmountType: numericAmount < 0 ? "debit" : "credit",
-    First15: first15,
-    Last15: last15,
-    HelperKey1: (first15 + last15).toLowerCase(),
-    HelperKey2: String(numericAmount),
-    SheetName: sheetName,
-    __id: uid(),
-  };
-}
-
-// --- END AUTO PATCH ---
