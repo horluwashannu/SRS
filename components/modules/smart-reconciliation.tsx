@@ -2588,10 +2588,31 @@ export function parseCSV(text: string, opts?: ParseOptions): { header: string[];
 
 export type Sheet = { name: string; rows: ParsedRow[] };
 
+function reconcileRows(
+  rowsA: ParsedRow[],
+  rowsB: ParsedRow[],
+  amountColA: string,
+  amountColB: string
+) {
+  const mapA = new Map<number, ParsedRow[]>();
+  const matches: { left: ParsedRow; right: ParsedRow }[] = [];
+
+  // Build mapA (group A rows by absolute amount)
+  for (const r of rowsA) {
+    const n = normalizeAmount(r[amountColA] as any);
+    (r as any).__amount = n;
+
+    const key = n.AmountAbs;
+    if (!mapA.has(key)) mapA.set(key, []);
+    mapA.get(key)!.push(r);
+  }
+
+  // Process B
   const unmatchedB: ParsedRow[] = [];
   for (const r of rowsB) {
     const n = normalizeAmount(r[amountColB] as any);
     (r as any).__amount = n;
+
     const candidates = mapA.get(n.AmountAbs);
     if (candidates && candidates.length > 0) {
       matches.push({ left: candidates.shift()!, right: r });
@@ -2599,14 +2620,17 @@ export type Sheet = { name: string; rows: ParsedRow[] };
       unmatchedB.push(r);
     }
   }
+
+  // Remaining unmatched A rows
   const unmatchedA = Array.from(mapA.values()).flat();
-  const unmatchedB = Array.from(mapB.values()).flat();
 
   return { matches, unmatchedA, unmatchedB };
 }
 
 export async function heavyParseServerSide(csvText: string, opts?: ParseOptions) {
   return parseCSV(csvText, opts);
+}
+
 }
 /* ===== auto-added helpers END ===== */
 
