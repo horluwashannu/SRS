@@ -572,113 +572,66 @@ export function SmartReconciliation({ userId }: Props) {
   }
 
   /* For All-in-One: parse sheet and split debit/credit */
-  async function parseAllInOne(file: File) {
+async function parseAllInOne(file: File) {
+  try {
     setUploadProgress(5);
+
     const arrayBuffer = await file.arrayBuffer();
-    setUploadProgress(15);
-    const wb = XLSX.read(arrayBuffer, { type: "array", cellDates: true, raw: false, defval: "" });
-    setUploadProgress(25);
-    const sheetName = wb.SheetNames[0];
-    const sheet = wb.Sheets[sheetName];
-    const rawRows: any[] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", blankrows: true });
-    // find header
-    let headerRowIndex = 0;
-    let header: string[] = [];
-    for (let r = 0; r < Math.min(rawRows.length, 20); r++) {
-      const row = rawRows[r] || [];
-      const joined = row.map((c: any) => String(c ?? "").toLowerCase()).join("|");
-      if (joined.includes("date") && (joined.includes("amount") || joined.includes("amt"))) {
-        headerRowIndex = r;
-        header = (row || []).map((c: any) => String(c ?? ""));
-        break;
-      }
-    }
-    if (!header || header.length === 0) {
-      // fallback: assume first row is header
-      header = (rawRows[0] || []).map((c: any) => String(c ?? ""));
-      headerRowIndex = 0;
-    }
-    const lowerHeader = header.map(h => String(h).toLowerCase());
-    const dateIdx = lowerHeader.findIndex(h => h.includes("date"));
-    const narrIdx = lowerHeader.findIndex(h => h.includes("narr") || h.includes("desc") || h.includes("description"));
-    const amtIdx = lowerHeader.findIndex(h => h.includes("amount") || h.includes("amt"));
-    // detect side column
-    const sideIdxCandidates = ["side", "type", "dr", "dr/cr", "drcr", "debit", "credit", "debit/credit", "sign", "dc"];
-    let sideIdx = -1;
-    for (let i = 0; i < lowerHeader.length; i++) {
-      const h = lowerHeader[i];
-      for (const cand of sideIdxCandidates) {
-        if (h.includes(cand)) {
-          sideIdx = i;
-          break;
+    const wb = XLSX.read(arrayBuffer, {
+      type: "array",
+      cellDates: true,
+      raw: false,
+      defval: "",
+    });
+
+    let allRows: TransactionRow[] = [];
+
+    // Process every sheet — same logic as “current” file parsing
+    for (const sheetName of wb.SheetNames) {
+      const ws = wb.Sheets[sheetName];
+      if (!ws) continue;
+
+      const jsonRows: any[] = XLSX.utils.sheet_to_json(ws, {
+        defval: "",
+        raw: false,
+      });
+
+      for (const raw of jsonRows) {
+        try {
+          const row = normalizeRow(raw, sheetName); // EXACT SAME LOGIC AS CURRENT MODE
+          allRows.push(row);
+        } catch (e) {
+          console.warn("Skipping bad row", e);
         }
       }
-      if (sideIdx !== -1) break;
     }
-    // parse rows
-    const parsedRows: TransactionRow[] = [];
-    for (let r = headerRowIndex + 1; r < rawRows.length; r++) {
-      const row = rawRows[r] || [];
-      const rawDate = row[dateIdx] ?? "";
-      const rawNarr = row[narrIdx] ?? row.slice(1, Math.min(4, row.length)).join(" ") ?? "";
-      const rawAmt = row[amtIdx] ?? row[row.length - 1] ?? "";
-      const parsedAmt = robustParseNumber(rawAmt);
-      const num = parsedAmt.value;
-      const dateStr = excelDateToJS(rawDate);
-      const narrationClean = String(rawNarr ?? "").replace(/\s+/g, " ").trim();
-      const first15 = narrationClean.substring(0, 15).toUpperCase().trim();
-      const last15 = narrationClean.slice(-15).toUpperCase().trim();
-      const absAmount = Math.abs(num);
-      const helper1 = `${first15}_${absAmount}`;
-      const helper2 = `${last15}_${absAmount}`;
-      const newRow: TransactionRow = {
-        Date: dateStr || "",
-        Narration: String(rawNarr ?? ""),
-        OriginalAmount: parsedAmt.original,
-        SignedAmount: num,
-        IsNegative: parsedAmt.isNegative,
-        First15: first15,
-        Last15: last15,
-        HelperKey1: helper1,
-        HelperKey2: helper2,
-        __id: uid(),
-        SheetName: sheetName,
-      };
-      // determine side
-      let side: Side | null = null;
-      if (sideIdx >= 0) {
-        const v = String(row[sideIdx] ?? "").toLowerCase().trim();
-        if (v) {
-          if (v.includes("dr") || v.includes("debit") || v === "d") side = "debit";
-          if (v.includes("cr") || v.includes("credit") || v === "c") side = "credit";
-          if (v.includes("debit") && v.includes("credit")) side = null;
-          if (v.includes("-") && !side) {
-            // nothing
-          }
-        }
-      }
-      if (!side) {
-        // fall back to sign
-        if (num < 0) side = "debit";
-        else side = "credit";
-      }
-      newRow.side = side;
-      newRow.status = "pending";
-      parsedRows.push(newRow);
-    }
-    setUploadProgress(60);
-    // split
-    const debits = parsedRows.filter(r => r.side === "debit");
-    const credits = parsedRows.filter(r => r.side === "credit");
+
+    setUploadProgress(40);
+
+    // Correct debit/credit split EXACT same logic as multi-mode logic
+    const debits = allRows.filter(
+      (r) =>
+        r.AmountType === "debit" || Number(r.SignedAmount) < 0
+    );
+
+    const credits = allRows.filter(
+      (r) =>
+        r.AmountType === "credit" || Number(r.SignedAmount) >= 0
+    );
+
     setUploadProgress(100);
+
     return {
-      rows: parsedRows,
+      rows: allRows,
       debits,
       credits,
-      sheetName,
+      sheetName: "All-In-One",
     };
+  } catch (err) {
+    console.error("parseAllInOne error:", err);
+    return { rows: [], debits: [], credits: [], sheetName: "" };
   }
-
+}
   /* auto knock */
   function autoKnockOffWithinCurrent(rows: TransactionRow[]) {
     const used = new Set<number>();
