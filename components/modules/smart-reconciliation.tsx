@@ -2598,15 +2598,12 @@ export type Sheet = { name: string; rows: ParsedRow[] };
     } else {
       unmatchedB.push(r);
     }
-  }
+  
   
   const unmatchedA = Array.from(mapA.values()).flat();
   const unmatchedB = Array.from(mapB.values()).flat();
 
   return { matches, unmatchedA, unmatchedB };
-}
-
-return { matches, unmatchedA, unmatchedB };
 }
 
 export async function heavyParseServerSide(csvText: string, opts?: ParseOptions) {
