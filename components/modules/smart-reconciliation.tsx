@@ -572,12 +572,18 @@ export function SmartReconciliation({ userId }: Props) {
   }
 
   /* For All-in-One: parse sheet and split debit/credit */
+/* For All-in-One: parse sheet and split debit/credit using CURRENT-MONTH logic */
 async function parseAllInOne(file: File) {
   try {
     setUploadProgress(10);
 
     const data = await file.arrayBuffer();
-    const workbook = XLSX.read(data, { type: "array", cellDates: true, raw: false, defval: "" });
+    const workbook = XLSX.read(data, {
+      type: "array",
+      cellDates: true,
+      raw: false,
+      defval: ""
+    });
 
     const allRows: TransactionRow[] = [];
 
@@ -585,30 +591,43 @@ async function parseAllInOne(file: File) {
       const ws = workbook.Sheets[sheetName];
       if (!ws) continue;
 
-      const jsonRows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false });
+      // always use JSON parsing (same as current-mode)
+      const jsonRows: any[] = XLSX.utils.sheet_to_json(ws, {
+        raw: false,
+        defval: ""
+      });
 
       for (const raw of jsonRows) {
         try {
-          // Use EXACT SAME LOGIC as current month upload
+          // EXACT same logic as current file parsing
           const row = normalizeRow(raw, sheetName);
 
-          // Ensure debit/credit side matches "current" logic
-          if (!row.side) {
-            row.side = row.SignedAmount < 0 ? "debit" : "credit";
-          }
+          // Ensure debit/credit assignment matches current-mode
+          row.side =
+            row.side ||
+            (row.SignedAmount < 0 ? "debit" : "credit");
 
           allRows.push(row);
         } catch (err) {
-          console.warn("skip bad row", err);
+          console.warn("Skipping invalid row:", err);
         }
       }
     }
 
-    setUploadProgress(80);
+    setUploadProgress(70);
 
-    // Same split logic as current-month mode
-    const debits = allRows.filter(r => r.SignedAmount < 0 || r.AmountType === "debit");
-    const credits = allRows.filter(r => r.SignedAmount >= 0 || r.AmountType === "credit");
+    // Split like current mode
+    const debits = allRows.filter(
+      r => r.side === "debit" || r.SignedAmount < 0
+    );
+
+    const credits = allRows.filter(
+      r => r.side === "credit" || r.SignedAmount >= 0
+    );
+
+    // Now run auto-matching
+    const { matchedPairs, pendingDebits, pendingCredits } =
+      matchPairs(debits, credits);
 
     setUploadProgress(100);
 
@@ -616,63 +635,77 @@ async function parseAllInOne(file: File) {
       rows: allRows,
       debits,
       credits,
+      matchedPairs,
+      pendingDebits,
+      pendingCredits,
       sheetName: "All-In-One"
     };
-
   } catch (err) {
     console.error("parseAllInOne error:", err);
-    return { rows: [], debits: [], credits: [], sheetName: "" };
+    return {
+      rows: [],
+      debits: [],
+      credits: [],
+      matchedPairs: [],
+      pendingDebits: [],
+      pendingCredits: [],
+      sheetName: ""
+    };
   }
 }
 
 
   /* match pairs */
-  function matchPairs(
-    debits: TransactionRow[],
-    credits: TransactionRow[]
-  ): {
-    matchedPairs: { debit: TransactionRow; credit: TransactionRow }[];
-    pendingDebits: TransactionRow[];
-    pendingCredits: TransactionRow[];
-  } {
-    const creditIndex = new Map<string, number[]>();
-    credits.forEach((c, idx) => {
-      const k1 = `${c.HelperKey1}_${Math.abs(c.SignedAmount ?? 0)}`;
-      const k2 = `${c.HelperKey2}_${Math.abs(c.SignedAmount ?? 0)}`;
-      if (!creditIndex.has(k1)) creditIndex.set(k1, []);
-      if (!creditIndex.has(k2)) creditIndex.set(k2, []);
-      creditIndex.get(k1)!.push(idx);
-      creditIndex.get(k2)!.push(idx);
-    });
-    const matchedPairs: { debit: TransactionRow; credit: TransactionRow }[] = [];
-    const pendingDebits: TransactionRow[] = [];
-    const usedCreditIdx = new Set<number>();
-    for (const d of debits) {
-      let foundIdx: number | null = null;
-      const keysToTry = [
-        `${d.HelperKey1}_${Math.abs(d.SignedAmount ?? 0)}`,
-        `${d.HelperKey2}_${Math.abs(d.SignedAmount ?? 0)}`
-      ];
-      for (const k of keysToTry) {
-        const arr = creditIndex.get(k);
-        if (arr && arr.length) {
-          const idx = arr.find((i) => !usedCreditIdx.has(i));
-          if (idx !== undefined) {
-            foundIdx = idx;
-            break;
-          }
+ function matchPairs(
+  debits: TransactionRow[],
+  credits: TransactionRow[]
+) {
+  const creditIndex = new Map<string, number[]>();
+
+  // index credits by HelperKey
+  credits.forEach((c, idx) => {
+    const key1 = `${c.HelperKey1}_${Math.abs(c.SignedAmount)}`;
+    const key2 = `${c.HelperKey2}_${Math.abs(c.SignedAmount)}`;
+    if (!creditIndex.has(key1)) creditIndex.set(key1, []);
+    if (!creditIndex.has(key2)) creditIndex.set(key2, []);
+    creditIndex.get(key1)!.push(idx);
+    creditIndex.get(key2)!.push(idx);
+  });
+
+  const matchedPairs = [];
+  const pendingDebits = [];
+  const used = new Set<number>();
+
+  for (const d of debits) {
+    const k1 = `${d.HelperKey1}_${Math.abs(d.SignedAmount)}`;
+    const k2 = `${d.HelperKey2}_${Math.abs(d.SignedAmount)}`;
+
+    let foundIdx = null;
+
+    for (const k of [k1, k2]) {
+      const arr = creditIndex.get(k);
+      if (arr) {
+        const free = arr.find(i => !used.has(i));
+        if (free !== undefined) {
+          foundIdx = free;
+          break;
         }
       }
-      if (foundIdx !== null) {
-        usedCreditIdx.add(foundIdx);
-        matchedPairs.push({ debit: d, credit: credits[foundIdx] });
-      } else {
-        pendingDebits.push(d);
-      }
     }
-    const pendingCredits = credits.filter((_, i) => !usedCreditIdx.has(i));
-    return { matchedPairs, pendingDebits, pendingCredits };
+
+    if (foundIdx !== null) {
+      used.add(foundIdx);
+      matchedPairs.push({ debit: d, credit: credits[foundIdx] });
+    } else {
+      pendingDebits.push(d);
+    }
   }
+
+  const pendingCredits = credits.filter((_, i) => !used.has(i));
+
+  return { matchedPairs, pendingDebits, pendingCredits };
+}
+
 
   /* handle uploads (previous/current/all) */
   const handleFileUpload = async (file: File, fileType: "previous" | "current" | "all") => {
