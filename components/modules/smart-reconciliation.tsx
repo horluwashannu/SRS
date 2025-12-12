@@ -225,7 +225,7 @@ const [uploadedAllCredits, setUploadedAllCredits] = useState<TransactionRow[]>([
 
   /* parsing + logs */
 const [uploadProgress, setUploadProgress] = useState<number>(0);
-const [lastParseLog, setLastParseLog] = useState<string>("");
+const [lastParseLog, ] = useState<string>("");
 
   /* active sheets */
 const [activePrevSheet, setActivePrevSheet] = useState<string | null>(null);
@@ -2807,18 +2807,26 @@ try {
     }
 
     const pendingCredits = credits.filter((_, i) => !usedCreditIdx.has(i));
+if (typeof setUploadedAll === 'function') setUploadedAll(collected);
+if (typeof setUploadedAllDebits === 'function') setUploadedAllDebits(debits);
+if (typeof setUploadedAllCredits === 'function') setUploadedAllCredits(credits);
 
-    if (typeof setUploadedAll === 'function') setUploadedAll(collected);
-    if (typeof setUploadedAllDebits === 'function') setUploadedAllDebits(debits);
-    if (typeof setUploadedAllCredits === 'function') setUploadedAllCredits(credits);
-
-    setLastParseLog && .toISOString()} - ${file.name} parsed. rows=${collected.length} matches=${matchedPairs.length} pendingD=${pendingDebits.length} pendingC=${pendingCredits.length}`);
-    return { rows: collected, debits, credits, matchedPairs, pendingDebits, pendingCredits };
-  } catch (err) {
-    console.error('parseAllInOne error', err);
-    setLastParseLog && );
-    return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [] };
-  }
+if (typeof setLastParseLog === 'function') {
+  setLastParseLog(
+    `${new Date().toISOString()} - ${file.name} parsed. rows=${collected.length} matches=${matchedPairs.length} pendingD=${pendingDebits.length} pendingC=${pendingCredits.length}`
+  );
 }
 
-// --- END AUTO PATCH ---
+return { rows: collected, debits, credits, matchedPairs, pendingDebits, pendingCredits };
+} catch (err) {
+  console.error('parseAllInOne error', err);
+
+  if (typeof setLastParseLog === 'function') {
+    setLastParseLog(
+      `${new Date().toISOString()} - parseAllInOne ERROR: ${String(err?.message || err)}`
+    );
+  }
+
+  return { rows: [], debits: [], credits: [], matchedPairs: [], pendingDebits: [], pendingCredits: [] };
+}
+}
