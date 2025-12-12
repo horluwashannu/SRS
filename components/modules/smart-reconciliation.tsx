@@ -702,7 +702,7 @@ setUploadedAllCredits(credits);
 setAllFile(file);
 
 setLastParseLog(
-  `${new Date().toISOString()} - ${file.name}\nAll-in-one parsed. Debits: ${debits.length}, Credits: ${credits.length}`
+  `${new Date().toISOString()} - ${file.name}\n${log}`
 );
 
 alert(`All-in-one parsed: D ${debits.length} • C ${credits.length}`);
