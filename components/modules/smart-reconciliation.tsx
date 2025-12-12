@@ -195,7 +195,7 @@ export function SmartReconciliation({ userId }: Props) {
   const [uploadedCurrRemaining, setUploadedCurrRemaining] = useState<TransactionRow[]>([]);
   const [autoKnockedOffCurr, setAutoKnockedOffCurr] = useState<TransactionRow[]>([]);
 
-  /* all-in-one arrays */
+  /*  arrays */
   const [uploadedAll, setUploadedAll] = useState<TransactionRow[]>([]);
   const [uploadedAllDebits, setUploadedAllDebits] = useState<TransactionRow[]>([]);
   const [uploadedAllCredits, setUploadedAllCredits] = useState<TransactionRow[]>([]);
@@ -570,13 +570,13 @@ export function SmartReconciliation({ userId }: Props) {
     const file = new File([blob], fileNameHint, { type: blob.type });
     return parseUploadedSheetWithMetadata(file);
   }
-
+// all in one parse 
 async function parseAllInOne(file: File) {
   try {
     setUploadProgress(5);
 
-    const buffer = await file.arrayBuffer();
-    const workbook = XLSX.read(buffer, {
+    const arrayBuffer = await file.arrayBuffer();
+    const workbook = XLSX.read(arrayBuffer, {
       type: "array",
       cellDates: true,
       raw: false,
@@ -594,22 +594,21 @@ async function parseAllInOne(file: File) {
       const grid: any[] = XLSX.utils.sheet_to_json(sheet, {
         header: 1,
         defval: "",
-        blankrows: false,   // IMPORTANT FIX
+        blankrows: true,
       });
 
       if (!grid || grid.length === 0) continue;
 
-      /* =======================
-         READ META TOP 50 ROWS
-         ======================= */
-      let tempMeta: any = {};
+      /* --------------------------------------
+         READ META (same as single-sheet)
+      -------------------------------------- */
+      const tempMeta: any = {};
 
       for (let r = 0; r < Math.min(grid.length, 50); r++) {
         const row = grid[r] || [];
-
         for (let c = 0; c < row.length; c++) {
           const raw = row[c];
-          if (!raw) continue;
+          if (raw === null || raw === undefined) continue;
 
           const txt = String(raw).trim();
           if (!txt) continue;
@@ -618,105 +617,136 @@ async function parseAllInOne(file: File) {
 
           for (const mk of Object.keys(META_KEY_MAP)) {
             const mkNorm = normalizeLabel(mk);
-
-            if (norm === mkNorm || norm.includes(mkNorm) || mkNorm.includes(norm)) {
-              const value = row[c + 1] ?? row[c + 2] ?? "";
+            if (
+              norm === mkNorm ||
+              norm.includes(mkNorm) ||
+              mkNorm.includes(norm)
+            ) {
+              const valueCandidate = row[c + 1] ?? row[c + 2] ?? "";
               const field = META_KEY_MAP[mkNorm] ?? META_KEY_MAP[mk];
-              tempMeta[field] = String(value ?? "").trim();
+
+              if (field) {
+                tempMeta[field] =
+                  valueCandidate === null || valueCandidate === undefined
+                    ? ""
+                    : String(valueCandidate).trim();
+              }
             }
           }
         }
       }
 
+      // merge meta from each sheet
       collectedMeta = { ...collectedMeta, ...tempMeta };
 
-      /* =======================
-         FIND HEADER ROW
-         ======================= */
-      let headerRow = null;
-      let headerCols = null;
+      /* --------------------------------------
+         FIND HEADER (same logic as single-sheet)
+      -------------------------------------- */
+      let headerRowIndex: number | null = null;
+      let headerCols: {
+        dateIdx: number;
+        narrationIdx: number;
+        amountIdx: number;
+        ageIdx: number;
+      } | null = null;
 
       for (let r = 0; r < Math.min(grid.length, 40); r++) {
         const row = grid[r] || [];
-        const joined = row.join("|").toLowerCase();
+        const txt = row.map((c: any) => String(c ?? "").toLowerCase()).join("|");
 
         if (
-          joined.includes("trn") &&
-          (joined.includes("narr") || joined.includes("description")) &&
-          joined.includes("amount")
+          txt.includes("tran") &&
+          (txt.includes("narr") || txt.includes("narration")) &&
+          txt.includes("amount")
         ) {
-          headerRow = r;
+          headerRowIndex = r;
+          const lower = row.map((c) => String(c ?? "").toLowerCase());
 
-          const lower = row.map((c: any) => String(c ?? "").toLowerCase());
+          const dateIdx = lower.findIndex(
+            (h) =>
+              h.includes("tran_date") ||
+              h.includes("tran date") ||
+              h.includes("transaction date") ||
+              h === "date" ||
+              h.includes("tran")
+          );
+
+          const narrationIdx = lower.findIndex(
+            (h) =>
+              h.includes("narr") ||
+              h.includes("description") ||
+              h.includes("narration") ||
+              h.includes("narrative")
+          );
+
+          const amountIdx = lower.findIndex(
+            (h) => h.includes("amount") || h.includes("amt")
+          );
+
+          const ageIdx = lower.findIndex(
+            (h) => h.includes("age") || h.includes("days")
+          );
 
           headerCols = {
-            dateIdx: lower.findIndex((h) =>
-              h.includes("date") || h.includes("trn")
-            ),
-            narrationIdx: lower.findIndex((h) =>
-              h.includes("narr") || h.includes("description")
-            ),
-            amountIdx: lower.findIndex((h) =>
-              h.includes("amount") || h.includes("amt")
-            ),
-            ageIdx: lower.findIndex((h) =>
-              h.includes("age") || h.includes("days")
-            ),
+            dateIdx: dateIdx >= 0 ? dateIdx : 0,
+            narrationIdx: narrationIdx >= 0 ? narrationIdx : 1,
+            amountIdx: amountIdx >= 0 ? amountIdx : 2,
+            ageIdx: ageIdx >= 0 ? ageIdx : 3,
           };
 
           break;
         }
       }
 
-      let startRow = headerRow !== null ? headerRow + 1 : 9;
-      if (grid.length < 9) startRow = 0;
+      let startRow = 8;
+      let mappingByHeader = false;
 
-      /* =======================
-         PARSE ROWS SAFELY
-         ======================= */
+      if (headerRowIndex !== null && headerCols !== null) {
+        startRow = headerRowIndex + 1;
+        mappingByHeader = true;
+      } else {
+        if (grid.length < 9) startRow = 0;
+      }
+
+      /* --------------------------------------
+         PARSE ROWS — STRICT FOOTER DETECTION
+      -------------------------------------- */
       for (let r = startRow; r < grid.length; r++) {
         const row = grid[r] || [];
 
-        const upper = row.map((x: any) => String(x ?? "").toUpperCase()).join(" ");
+        // ==== STRICT FOOTER MATCH (EXACT FIRST CELL ONLY) ====
+        const cell0 = String(row[0] ?? "").trim().toUpperCase();
+        if (cell0 === "PROOF TOTAL") continue;
+        if (cell0 === "SYSTEM BALANCE") continue;
+        if (cell0 === "DIFFERENCE") continue;
 
-        // STRICT FOOTER SKIP
-        if (/^PROOF TOTAL/i.test(upper)) continue;
-        if (/^SYSTEM BALANCE/i.test(upper)) continue;
-        if (/^DIFFERENCE/i.test(upper)) continue;
+        // start parsing
+        const rawDate = mappingByHeader ? row[headerCols!.dateIdx] : row[0];
+        const rawNarr = mappingByHeader ? row[headerCols!.narrationIdx] : row[1];
+        const rawAmt = mappingByHeader ? row[headerCols!.amountIdx] : row[2];
+        const rawAge = mappingByHeader ? row[headerCols!.ageIdx] : row[3];
 
-        /* Extract cells */
-        const rawDate =
-          headerCols && headerRow !== null ? row[headerCols.dateIdx] : row[0];
-        const rawNarr =
-          headerCols && headerRow !== null ? row[headerCols.narrationIdx] : row[1];
-        const rawAmt =
-          headerCols && headerRow !== null ? row[headerCols.amountIdx] : row[2];
-        const rawAge =
-          headerCols && headerRow !== null ? row[headerCols.ageIdx] : row[3];
+        if ([rawDate, rawNarr, rawAmt].every((v) => !v)) continue;
 
-        // Real row MUST have a narration + amount
-        if (!rawNarr || String(rawNarr).trim() === "") continue;
-        if (rawAmt === "" || rawAmt === null || rawAmt === undefined) continue;
-
-        const amtParsed = robustParseNumber(rawAmt);
-        const numeric = amtParsed.value;
+        const parsedAmt = robustParseNumber(rawAmt);
+        const numeric = parsedAmt.value;
+        combinedProof += numeric;
 
         const dateStr = excelDateToJS(rawDate);
-
-        const narrClean = String(rawNarr ?? "").replace(/\s+/g, " ").trim();
+        const narrClean = String(rawNarr ?? "")
+          .replace(/\s+/g, " ")
+          .trim();
 
         const f15 = narrClean.substring(0, 15).toUpperCase();
         const l15 = narrClean.slice(-15).toUpperCase();
         const absAmt = Math.abs(numeric);
 
-        combinedProof += numeric;
-
-        allRows.push({
+        const rowObj: TransactionRow = {
           Date: dateStr || "",
-          Narration: narrClean,
-          OriginalAmount: amtParsed.original,
+          Narration: String(rawNarr ?? ""),
+          OriginalAmount: parsedAmt.original,
           SignedAmount: numeric,
-          IsNegative: numeric < 0,
+          IsNegative: parsedAmt.isNegative,
           Age: rawAge ?? undefined,
           First15: f15,
           Last15: l15,
@@ -724,13 +754,16 @@ async function parseAllInOne(file: File) {
           HelperKey2: `${l15}_${absAmt}`,
           __id: uid(),
           SheetName: sheetName,
-          side: numeric < 0 ? "debit" : "credit",
-          status: "pending",
-        });
+        };
+
+        rowObj.side = numeric < 0 ? "debit" : "credit";
+        rowObj.status = "pending";
+
+        allRows.push(rowObj);
       }
     }
 
-    /* Split */
+    /* ---- SPLIT ---- */
     const debits = allRows.filter((r) => r.SignedAmount < 0);
     const credits = allRows.filter((r) => r.SignedAmount >= 0);
 
@@ -740,9 +773,10 @@ async function parseAllInOne(file: File) {
       credits,
       meta: collectedMeta,
       proofTotal: combinedProof,
+      sheetName: "All-In-One",
     };
   } catch (err) {
-    console.error(err);
+    console.error("ALL-IN-ONE ERROR:", err);
     return { rows: [], debits: [], credits: [], meta: {}, proofTotal: 0 };
   }
 }
