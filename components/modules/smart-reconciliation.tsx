@@ -571,228 +571,236 @@ export function SmartReconciliation({ userId }: Props) {
     return parseUploadedSheetWithMetadata(file);
   }
 
- /* ============================
-   ALL-IN-ONE PARSER (FIXED)
-   ============================ */
-async function parseAllInOne(file: File) {
-  try {
-    setUploadProgress(5);
+ /* ============================================================
+   ALL-IN-ONE PARSER — FINAL, 
+   ============================================================ */
 
-    const arrayBuffer = await file.arrayBuffer();
-    const workbook = XLSX.read(arrayBuffer, {
-      type: "array",
-      cellDates: true,
-      raw: false,
+async function parseAllInOne(file: File) {
+  setUploadProgress(5);
+
+  const arrayBuffer = await file.arrayBuffer();
+  setUploadProgress(15);
+
+  const workbook = XLSX.read(arrayBuffer, {
+    type: "array",
+    cellDates: true,
+    raw: false,
+    defval: "",
+  });
+
+  setUploadProgress(25);
+
+  const allRows: TransactionRow[] = [];
+  let collectedMeta: any = {};
+  let combinedProof = 0;
+
+  /* ============================================================
+     LOOP THROUGH ALL SHEETS (NO SELECTION)
+     ============================================================ */
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) continue;
+
+    const grid: any[][] = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
       defval: "",
+      blankrows: true,
     });
 
-    let allRows: TransactionRow[] = [];
-    let collectedMeta: any = {};
-    let combinedProof = 0;
+    if (!grid || grid.length === 0) continue;
 
-    /* ============================
-       LOOP SHEETS (NO SELECTION)
-       ============================ */
-    for (const sheetName of workbook.SheetNames) {
-      const sheet = workbook.Sheets[sheetName];
-      if (!sheet) continue;
+    /* ============================================================
+       META EXTRACTION 
+       ============================================================ */
+    const tempMeta: any = {};
 
-      const grid: any[] = XLSX.utils.sheet_to_json(sheet, {
-        header: 1,
-        defval: "",
-        blankrows: true,
-      });
-      if (!grid || grid.length === 0) continue;
+    for (let r = 0; r < Math.min(grid.length, 50); r++) {
+      const row = grid[r] || [];
+      for (let c = 0; c < row.length; c++) {
+        const raw = row[c];
+        if (raw === null || raw === undefined) continue;
 
-      /* ============================
-         META (SAME AS SINGLE SHEET)
-         ============================ */
-      const tempMeta: any = {};
-      for (let r = 0; r < Math.min(grid.length, 50); r++) {
-        const row = grid[r] || [];
-        for (let c = 0; c < row.length; c++) {
-          const raw = row[c];
-          if (raw == null) continue;
+        const txt = String(raw).trim();
+        if (!txt) continue;
 
-          const txt = String(raw).trim();
-          if (!txt) continue;
+        const norm = normalizeLabel(txt);
 
-          const norm = normalizeLabel(txt);
-          for (const mk of Object.keys(META_KEY_MAP)) {
-            const mkNorm = normalizeLabel(mk);
-            if (norm === mkNorm || norm.includes(mkNorm) || mkNorm.includes(norm)) {
-              const valueCandidate = row[c + 1] ?? row[c + 2] ?? "";
-              const field = META_KEY_MAP[mkNorm] ?? META_KEY_MAP[mk];
-              if (field) {
-                tempMeta[field] = String(valueCandidate ?? "").trim();
-              }
+        for (const mk of Object.keys(META_KEY_MAP)) {
+          const mkNorm = normalizeLabel(mk);
+          if (
+            norm === mkNorm ||
+            norm.includes(mkNorm) ||
+            mkNorm.includes(norm)
+          ) {
+            const valueCandidate = row[c + 1] ?? row[c + 2] ?? "";
+            const field = META_KEY_MAP[mkNorm] ?? META_KEY_MAP[mk];
+
+            if (field) {
+              tempMeta[field] =
+                valueCandidate === null || valueCandidate === undefined
+                  ? ""
+                  : String(valueCandidate).trim();
             }
           }
         }
       }
-      collectedMeta = { ...collectedMeta, ...tempMeta };
+    }
 
-      /* ============================
-         HEADER DETECTION (RELAXED)
-         ============================ */
-      let headerRowIndex: number | null = null;
-      let headerCols: {
-        dateIdx: number;
-        narrationIdx: number;
-        amountIdx: number;
-        ageIdx: number;
-      } | null = null;
+    collectedMeta = { ...collectedMeta, ...tempMeta };
 
-      for (let r = 0; r < Math.min(grid.length, 40); r++) {
-        const row = grid[r] || [];
-        const rowText = row.map((c: any) => String(c ?? "").toLowerCase()).join("|");
+    /* ============================================================
+       HEADER DETECTION
+       ============================================================ */
+    let headerRowIndex: number | null = null;
+    let headerCols: {
+      dateIdx: number;
+      narrationIdx: number;
+      amountIdx: number;
+      ageIdx: number;
+    } | null = null;
 
-        if (
-          rowText.includes("date") &&
-          (rowText.includes("amount") ||
-            rowText.includes("debit") ||
-            rowText.includes("credit"))
-        ) {
-          headerRowIndex = r;
-          const lower = row.map((c) => String(c ?? "").toLowerCase());
+    for (let r = 0; r < Math.min(grid.length, 40); r++) {
+      const row = grid[r] || [];
+      const text = row.map((c) => String(c ?? "").toLowerCase()).join("|");
 
-          const dateIdx = lower.findIndex(
-            (h) =>
-              h.includes("tran_date") ||
-              h.includes("tran date") ||
-              h.includes("transaction date") ||
-              h === "date"
-          );
-          const narrationIdx = lower.findIndex(
-            (h) =>
-              h.includes("narr") ||
-              h.includes("description") ||
-              h.includes("details")
-          );
-          const amountIdx = lower.findIndex(
-            (h) => h.includes("amount") || h.includes("amt")
-          );
-          const ageIdx = lower.findIndex(
-            (h) => h.includes("age") || h.includes("days")
-          );
+      if (
+        text.includes("tran") &&
+        (text.includes("narr") || text.includes("narration")) &&
+        text.includes("amount")
+      ) {
+        headerRowIndex = r;
+        const lower = row.map((c) => String(c ?? "").toLowerCase());
 
-          headerCols = {
-            dateIdx: dateIdx >= 0 ? dateIdx : 0,
-            narrationIdx: narrationIdx >= 0 ? narrationIdx : 1,
-            amountIdx: amountIdx >= 0 ? amountIdx : 2,
-            ageIdx: ageIdx >= 0 ? ageIdx : 3,
-          };
-          break;
-        }
-      }
-
-      let startRow = 8;
-      let mappingByHeader = false;
-      if (headerRowIndex !== null && headerCols) {
-        startRow = headerRowIndex + 1;
-        mappingByHeader = true;
-      } else {
-        if (grid.length < 9) startRow = 0;
-      }
-
-      /* ============================
-         PARSE TRANSACTIONS
-         ============================ */
-      for (let r = startRow; r < grid.length; r++) {
-        const row = grid[r] || [];
-        const joinedUpper = row
-          .map((c: any) => String(c ?? "").trim())
-          .join(" ")
-          .toUpperCase();
-
-        if (joinedUpper.includes("PROOF TOTAL")) continue;
-
-        if (joinedUpper.includes("SYSTEM BALANCE")) {
-          for (let c = row.length - 1; c >= 0; c--) {
-            const parsedTry = robustParseNumber(row[c]);
-            if (parsedTry && Number.isFinite(parsedTry.value)) {
-              collectedMeta.SystemBalance = parsedTry.value;
-              break;
-            }
-          }
-          continue; // DO NOT BREAK
-        }
-
-        let rawDate, rawNarr, rawAmt, rawAge;
-        if (mappingByHeader && headerCols) {
-          rawDate = row[headerCols.dateIdx];
-          rawNarr = row[headerCols.narrationIdx];
-          rawAmt = row[headerCols.amountIdx];
-          rawAge = row[headerCols.ageIdx];
-        } else {
-          rawDate = row[0];
-          rawNarr = row[1];
-          rawAmt = row[2];
-          rawAge = row[3];
-        }
-
-        if (
-          (rawAmt === "" || rawAmt == null) &&
-          (rawNarr === "" || rawNarr == null)
-        ) {
-          continue;
-        }
-
-        const parsedAmt = robustParseNumber(rawAmt);
-        const numeric = parsedAmt.value;
-        if (!Number.isFinite(numeric) || numeric === 0) continue;
-
-        const dateStr = excelDateToJS(rawDate);
-        const narrClean = String(rawNarr ?? "").replace(/\\s+/g, " ").trim();
-
-        const f15 = narrClean.substring(0, 15).toUpperCase();
-        const l15 = narrClean.slice(-15).toUpperCase();
-        const absAmt = Math.abs(numeric);
-
-        const rowObj: TransactionRow = {
-          Date: dateStr || "",
-          Narration: String(rawNarr ?? ""),
-          OriginalAmount: parsedAmt.original,
-          SignedAmount: numeric,
-          IsNegative: parsedAmt.isNegative,
-          Age: rawAge ?? undefined,
-          First15: f15,
-          Last15: l15,
-          HelperKey1: `${f15}_${absAmt}`,
-          HelperKey2: `${l15}_${absAmt}`,
-          __id: uid(),
-          SheetName: sheetName,
-          side: numeric < 0 ? "debit" : "credit",
-          status: "pending",
+        headerCols = {
+          dateIdx:
+            lower.findIndex(
+              (h) =>
+                h.includes("tran_date") ||
+                h.includes("tran date") ||
+                h.includes("transaction date") ||
+                h === "date" ||
+                h.includes("tran")
+            ) ?? 0,
+          narrationIdx:
+            lower.findIndex(
+              (h) =>
+                h.includes("narr") ||
+                h.includes("description") ||
+                h.includes("narration") ||
+                h.includes("narrative")
+            ) ?? 1,
+          amountIdx:
+            lower.findIndex((h) => h.includes("amount") || h.includes("amt")) ??
+            2,
+          ageIdx:
+            lower.findIndex((h) => h.includes("age") || h.includes("days")) ??
+            3,
         };
-
-        allRows.push(rowObj);
-        combinedProof += numeric;
+        break;
       }
     }
 
-    /* ============================
-       SPLIT
-       ============================ */
-    const debits = allRows.filter((r) => r.SignedAmount < 0);
-    const credits = allRows.filter((r) => r.SignedAmount > 0);
+    const mappingByHeader =
+      headerRowIndex !== null && headerCols !== null;
+    const startRow = mappingByHeader ? headerRowIndex! + 1 : 0;
 
-    if (allRows.length === 0) {
-      throw new Error("All-in-one: no transaction rows detected");
+    /* ============================================================
+       ROW PARSING — LOSSLESS & FOOTER-SAFE
+       ============================================================ */
+    for (let r = startRow; r < grid.length; r++) {
+      const row = grid[r] || [];
+
+      const rowText = row
+        .map((c) => String(c ?? "").trim().toUpperCase())
+        .join(" ");
+
+      /* ---- HARD STOP FOOTERS (GLOBAL) ---- */
+      if (
+        rowText.includes("PROOF TOTAL") ||
+        rowText.includes("SYSTEM BALANCE") ||
+        rowText.includes("DIFFERENCE")
+      ) {
+        break; // <-- DO NOT CONTINUE, STOP SHEET
+      }
+
+      const rawDate = mappingByHeader
+        ? row[headerCols!.dateIdx]
+        : row[0];
+      const rawNarr = mappingByHeader
+        ? row[headerCols!.narrationIdx]
+        : row[1];
+      let rawAmt = mappingByHeader
+        ? row[headerCols!.amountIdx]
+        : row[2];
+      const rawAge = mappingByHeader
+        ? row[headerCols!.ageIdx]
+        : row[3];
+
+      /* ---- AMOUNT RESOLUTION (ROBUST) ---- */
+      let parsedAmt = robustParseNumber(rawAmt);
+
+      if (!Number.isFinite(parsedAmt.value)) {
+        for (let c = row.length - 1; c >= 0; c--) {
+          const tryParse = robustParseNumber(row[c]);
+          if (Number.isFinite(tryParse.value)) {
+            parsedAmt = tryParse;
+            rawAmt = row[c];
+            break;
+          }
+        }
+      }
+
+      if (!Number.isFinite(parsedAmt.value)) continue;
+
+      const numeric = parsedAmt.value;
+      combinedProof += numeric;
+
+      const dateStr = excelDateToJS(rawDate);
+      const narrClean = String(rawNarr ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      const f15 = narrClean.substring(0, 15).toUpperCase();
+      const l15 = narrClean.slice(-15).toUpperCase();
+      const absAmt = Math.abs(numeric);
+
+      const rowObj: TransactionRow = {
+        Date: dateStr || "",
+        Narration: String(rawNarr ?? ""),
+        OriginalAmount: parsedAmt.original,
+        SignedAmount: numeric,
+        IsNegative: parsedAmt.isNegative,
+        Age: rawAge ?? undefined,
+        First15: f15,
+        Last15: l15,
+        HelperKey1: `${f15}_${absAmt}`,
+        HelperKey2: `${l15}_${absAmt}`,
+        __id: uid(),
+        SheetName: sheetName,
+        side: numeric < 0 ? "debit" : "credit",
+        status: "pending",
+      };
+
+      allRows.push(rowObj);
     }
-
-    return {
-      rows: allRows,
-      debits,
-      credits,
-      meta: collectedMeta,
-      proofTotal: combinedProof,
-      sheetName: "ALL-IN-ONE",
-    };
-  } catch (err) {
-    console.error("ALL-IN-ONE PARSE ERROR:", err);
-    throw err;
   }
+
+  /* ============================================================
+     SPLIT DEBITS / CREDITS
+     ============================================================ */
+  const debits = allRows.filter((r) => r.SignedAmount < 0);
+  const credits = allRows.filter((r) => r.SignedAmount >= 0);
+
+  setUploadProgress(100);
+
+  return {
+    rows: allRows,
+    debits,
+    credits,
+    meta: collectedMeta,
+    proofTotal: combinedProof,
+    sheetName: "ALL-IN-ONE",
+  };
 }
 
 
