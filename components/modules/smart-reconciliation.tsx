@@ -1976,8 +1976,8 @@ async function parseAllInOne(file: File) {
           <div className="flex items-center gap-2">
             <div className="text-xs text-muted-foreground">Mode</div>
             <div className="inline-flex rounded-md overflow-hidden border">
-              <button onClick={() => setMode('multi')} className={`px-3 py-1 text-xs ${mode === 'multi' ? "bg-primary text-white" : "bg-white dark:bg-slate-800"}`}>Multi</button>
-              <button onClick={() => setMode('one')} className={`px-3 py-1 text-xs ${mode === 'one' ? "bg-primary text-white" : "bg-white dark:bg-slate-800"}`}>One</button>
+              <button onClick={() => setMode('multi')} className={`px-3 py-1 text-xs ${mode === 'multi' ? "bg-primary text-white" : "bg-white dark:bg-slate-800"}`}>Multi-Sheet</button>
+              <button onClick={() => setMode('one')} className={`px-3 py-1 text-xs ${mode === 'one' ? "bg-primary text-white" : "bg-white dark:bg-slate-800"}`}>One-Sheet</button>
               <button onClick={() => setMode('all')} className={`px-3 py-1 text-xs ${mode === 'all' ? "bg-primary text-white" : "bg-white dark:bg-slate-800"}`}>All-in-One</button>
             </div>
           </div>
