@@ -572,7 +572,7 @@ export function SmartReconciliation({ userId }: Props) {
   }
 
   /* For All-in-One: parse sheet and split debit/credit */
-  async function parseAllInOne(file: File) {
+ async function parseAllInOne(file: File) {
     setUploadProgress(5);
     const arrayBuffer = await file.arrayBuffer();
     setUploadProgress(15);
@@ -716,6 +716,7 @@ export function SmartReconciliation({ userId }: Props) {
     const remaining: TransactionRow[] = rows.filter((_, idx) => !used.has(idx));
     return { remaining, knockedOff };
   }
+
 
   /* match pairs */
   function matchPairs(
