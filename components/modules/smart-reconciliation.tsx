@@ -571,151 +571,230 @@ export function SmartReconciliation({ userId }: Props) {
     return parseUploadedSheetWithMetadata(file);
   }
 
-  /* For All-in-One: parse sheet and split debit/credit */
- async function parseAllInOne(file: File) {
+ /* ============================
+   ALL-IN-ONE PARSER (FIXED)
+   ============================ */
+async function parseAllInOne(file: File) {
+  try {
     setUploadProgress(5);
+
     const arrayBuffer = await file.arrayBuffer();
-    setUploadProgress(15);
-    const wb = XLSX.read(arrayBuffer, { type: "array", cellDates: true, raw: false, defval: "" });
-    setUploadProgress(25);
-    const sheetName = wb.SheetNames[0];
-    const sheet = wb.Sheets[sheetName];
-    const rawRows: any[] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", blankrows: true });
-    // find header
-    let headerRowIndex = 0;
-    let header: string[] = [];
-    for (let r = 0; r < Math.min(rawRows.length, 20); r++) {
-      const row = rawRows[r] || [];
-      const joined = row.map((c: any) => String(c ?? "").toLowerCase()).join("|");
-      if (joined.includes("date") && (joined.includes("amount") || joined.includes("amt"))) {
-        headerRowIndex = r;
-        header = (row || []).map((c: any) => String(c ?? ""));
-        break;
-      }
-    }
-    if (!header || header.length === 0) {
-      // fallback: assume first row is header
-      header = (rawRows[0] || []).map((c: any) => String(c ?? ""));
-      headerRowIndex = 0;
-    }
-    const lowerHeader = header.map(h => String(h).toLowerCase());
-    const dateIdx = lowerHeader.findIndex(h => h.includes("date"));
-    const narrIdx = lowerHeader.findIndex(h => h.includes("narr") || h.includes("desc") || h.includes("description"));
-    const amtIdx = lowerHeader.findIndex(h => h.includes("amount") || h.includes("amt"));
-    // detect side column
-    const sideIdxCandidates = ["side", "type", "dr", "dr/cr", "drcr", "debit", "credit", "debit/credit", "sign", "dc"];
-    let sideIdx = -1;
-    for (let i = 0; i < lowerHeader.length; i++) {
-      const h = lowerHeader[i];
-      for (const cand of sideIdxCandidates) {
-        if (h.includes(cand)) {
-          sideIdx = i;
-          break;
-        }
-      }
-      if (sideIdx !== -1) break;
-    }
-    // parse rows
-    const parsedRows: TransactionRow[] = [];
-    for (let r = headerRowIndex + 1; r < rawRows.length; r++) {
-      const row = rawRows[r] || [];
-      const rawDate = row[dateIdx] ?? "";
-      const rawNarr = row[narrIdx] ?? row.slice(1, Math.min(4, row.length)).join(" ") ?? "";
-      const rawAmt = row[amtIdx] ?? row[row.length - 1] ?? "";
-      const parsedAmt = robustParseNumber(rawAmt);
-      const num = parsedAmt.value;
-      const dateStr = excelDateToJS(rawDate);
-      const narrationClean = String(rawNarr ?? "").replace(/\s+/g, " ").trim();
-      const first15 = narrationClean.substring(0, 15).toUpperCase().trim();
-      const last15 = narrationClean.slice(-15).toUpperCase().trim();
-      const absAmount = Math.abs(num);
-      const helper1 = `${first15}_${absAmount}`;
-      const helper2 = `${last15}_${absAmount}`;
-      const newRow: TransactionRow = {
-        Date: dateStr || "",
-        Narration: String(rawNarr ?? ""),
-        OriginalAmount: parsedAmt.original,
-        SignedAmount: num,
-        IsNegative: parsedAmt.isNegative,
-        First15: first15,
-        Last15: last15,
-        HelperKey1: helper1,
-        HelperKey2: helper2,
-        __id: uid(),
-        SheetName: sheetName,
-      };
-      // determine side
-      let side: Side | null = null;
-      if (sideIdx >= 0) {
-        const v = String(row[sideIdx] ?? "").toLowerCase().trim();
-        if (v) {
-          if (v.includes("dr") || v.includes("debit") || v === "d") side = "debit";
-          if (v.includes("cr") || v.includes("credit") || v === "c") side = "credit";
-          if (v.includes("debit") && v.includes("credit")) side = null;
-          if (v.includes("-") && !side) {
-            // nothing
+    const workbook = XLSX.read(arrayBuffer, {
+      type: "array",
+      cellDates: true,
+      raw: false,
+      defval: "",
+    });
+
+    let allRows: TransactionRow[] = [];
+    let collectedMeta: any = {};
+    let combinedProof = 0;
+
+    /* ============================
+       LOOP SHEETS (NO SELECTION)
+       ============================ */
+    for (const sheetName of workbook.SheetNames) {
+      const sheet = workbook.Sheets[sheetName];
+      if (!sheet) continue;
+
+      const grid: any[] = XLSX.utils.sheet_to_json(sheet, {
+        header: 1,
+        defval: "",
+        blankrows: true,
+      });
+      if (!grid || grid.length === 0) continue;
+
+      /* ============================
+         META (SAME AS SINGLE SHEET)
+         ============================ */
+      const tempMeta: any = {};
+      for (let r = 0; r < Math.min(grid.length, 50); r++) {
+        const row = grid[r] || [];
+        for (let c = 0; c < row.length; c++) {
+          const raw = row[c];
+          if (raw == null) continue;
+
+          const txt = String(raw).trim();
+          if (!txt) continue;
+
+          const norm = normalizeLabel(txt);
+          for (const mk of Object.keys(META_KEY_MAP)) {
+            const mkNorm = normalizeLabel(mk);
+            if (norm === mkNorm || norm.includes(mkNorm) || mkNorm.includes(norm)) {
+              const valueCandidate = row[c + 1] ?? row[c + 2] ?? "";
+              const field = META_KEY_MAP[mkNorm] ?? META_KEY_MAP[mk];
+              if (field) {
+                tempMeta[field] = String(valueCandidate ?? "").trim();
+              }
+            }
           }
         }
       }
-      if (!side) {
-        // fall back to sign
-        if (num < 0) side = "debit";
-        else side = "credit";
-      }
-      newRow.side = side;
-      newRow.status = "pending";
-      parsedRows.push(newRow);
-    }
-    setUploadProgress(60);
-    // split
-    const debits = parsedRows.filter(r => r.side === "debit");
-    const credits = parsedRows.filter(r => r.side === "credit");
-    setUploadProgress(100);
-    return {
-      rows: parsedRows,
-      debits,
-      credits,
-      sheetName,
-    };
-  }
+      collectedMeta = { ...collectedMeta, ...tempMeta };
 
-  /* auto knock */
-  function autoKnockOffWithinCurrent(rows: TransactionRow[]) {
-    const used = new Set<number>();
-    const knockedOff: TransactionRow[] = [];
-    for (let i = 0; i < rows.length; i++) {
-      if (used.has(i)) continue;
-      const a = rows[i];
-      const aAbs = Math.abs(a.SignedAmount ?? 0);
-      for (let j = i + 1; j < rows.length; j++) {
-        if (used.has(j)) continue;
-        const b = rows[j];
-        const bAbs = Math.abs(b.SignedAmount ?? 0);
-        if (aAbs !== bAbs) continue;
-        if ((a.SignedAmount ?? 0) * (b.SignedAmount ?? 0) >= 0) continue;
-        const aKey1 = `${a.HelperKey1}_${aAbs}`;
-        const aKey2 = `${a.HelperKey2}_${aAbs}`;
-        const bKey1 = `${b.HelperKey1}_${bAbs}`;
-        const bKey2 = `${b.HelperKey2}_${bAbs}`;
-        const match =
-          aKey1 === bKey1 ||
-          aKey1 === bKey2 ||
-          aKey2 === bKey1 ||
-          aKey2 === bKey2;
-        if (match) {
-          used.add(i);
-          used.add(j);
-          const aCopy = { ...a, status: "auto" as Status };
-          const bCopy = { ...b, status: "auto" as Status };
-          knockedOff.push(aCopy);
-          knockedOff.push(bCopy);
+      /* ============================
+         HEADER DETECTION (RELAXED)
+         ============================ */
+      let headerRowIndex: number | null = null;
+      let headerCols: {
+        dateIdx: number;
+        narrationIdx: number;
+        amountIdx: number;
+        ageIdx: number;
+      } | null = null;
+
+      for (let r = 0; r < Math.min(grid.length, 40); r++) {
+        const row = grid[r] || [];
+        const rowText = row.map((c: any) => String(c ?? "").toLowerCase()).join("|");
+
+        if (
+          rowText.includes("date") &&
+          (rowText.includes("amount") ||
+            rowText.includes("debit") ||
+            rowText.includes("credit"))
+        ) {
+          headerRowIndex = r;
+          const lower = row.map((c) => String(c ?? "").toLowerCase());
+
+          const dateIdx = lower.findIndex(
+            (h) =>
+              h.includes("tran_date") ||
+              h.includes("tran date") ||
+              h.includes("transaction date") ||
+              h === "date"
+          );
+          const narrationIdx = lower.findIndex(
+            (h) =>
+              h.includes("narr") ||
+              h.includes("description") ||
+              h.includes("details")
+          );
+          const amountIdx = lower.findIndex(
+            (h) => h.includes("amount") || h.includes("amt")
+          );
+          const ageIdx = lower.findIndex(
+            (h) => h.includes("age") || h.includes("days")
+          );
+
+          headerCols = {
+            dateIdx: dateIdx >= 0 ? dateIdx : 0,
+            narrationIdx: narrationIdx >= 0 ? narrationIdx : 1,
+            amountIdx: amountIdx >= 0 ? amountIdx : 2,
+            ageIdx: ageIdx >= 0 ? ageIdx : 3,
+          };
           break;
         }
       }
+
+      let startRow = 8;
+      let mappingByHeader = false;
+      if (headerRowIndex !== null && headerCols) {
+        startRow = headerRowIndex + 1;
+        mappingByHeader = true;
+      } else {
+        if (grid.length < 9) startRow = 0;
+      }
+
+      /* ============================
+         PARSE TRANSACTIONS
+         ============================ */
+      for (let r = startRow; r < grid.length; r++) {
+        const row = grid[r] || [];
+        const joinedUpper = row
+          .map((c: any) => String(c ?? "").trim())
+          .join(" ")
+          .toUpperCase();
+
+        if (joinedUpper.includes("PROOF TOTAL")) continue;
+
+        if (joinedUpper.includes("SYSTEM BALANCE")) {
+          for (let c = row.length - 1; c >= 0; c--) {
+            const parsedTry = robustParseNumber(row[c]);
+            if (parsedTry && Number.isFinite(parsedTry.value)) {
+              collectedMeta.SystemBalance = parsedTry.value;
+              break;
+            }
+          }
+          continue; // DO NOT BREAK
+        }
+
+        let rawDate, rawNarr, rawAmt, rawAge;
+        if (mappingByHeader && headerCols) {
+          rawDate = row[headerCols.dateIdx];
+          rawNarr = row[headerCols.narrationIdx];
+          rawAmt = row[headerCols.amountIdx];
+          rawAge = row[headerCols.ageIdx];
+        } else {
+          rawDate = row[0];
+          rawNarr = row[1];
+          rawAmt = row[2];
+          rawAge = row[3];
+        }
+
+        if (
+          (rawAmt === "" || rawAmt == null) &&
+          (rawNarr === "" || rawNarr == null)
+        ) {
+          continue;
+        }
+
+        const parsedAmt = robustParseNumber(rawAmt);
+        const numeric = parsedAmt.value;
+        if (!Number.isFinite(numeric) || numeric === 0) continue;
+
+        const dateStr = excelDateToJS(rawDate);
+        const narrClean = String(rawNarr ?? "").replace(/\\s+/g, " ").trim();
+
+        const f15 = narrClean.substring(0, 15).toUpperCase();
+        const l15 = narrClean.slice(-15).toUpperCase();
+        const absAmt = Math.abs(numeric);
+
+        const rowObj: TransactionRow = {
+          Date: dateStr || "",
+          Narration: String(rawNarr ?? ""),
+          OriginalAmount: parsedAmt.original,
+          SignedAmount: numeric,
+          IsNegative: parsedAmt.isNegative,
+          Age: rawAge ?? undefined,
+          First15: f15,
+          Last15: l15,
+          HelperKey1: `${f15}_${absAmt}`,
+          HelperKey2: `${l15}_${absAmt}`,
+          __id: uid(),
+          SheetName: sheetName,
+          side: numeric < 0 ? "debit" : "credit",
+          status: "pending",
+        };
+
+        allRows.push(rowObj);
+        combinedProof += numeric;
+      }
     }
-    const remaining: TransactionRow[] = rows.filter((_, idx) => !used.has(idx));
-    return { remaining, knockedOff };
+
+    /* ============================
+       SPLIT
+       ============================ */
+    const debits = allRows.filter((r) => r.SignedAmount < 0);
+    const credits = allRows.filter((r) => r.SignedAmount > 0);
+
+    if (allRows.length === 0) {
+      throw new Error("All-in-one: no transaction rows detected");
+    }
+
+    return {
+      rows: allRows,
+      debits,
+      credits,
+      meta: collectedMeta,
+      proofTotal: combinedProof,
+      sheetName: "ALL-IN-ONE",
+    };
+  } catch (err) {
+    console.error("ALL-IN-ONE PARSE ERROR:", err);
+    throw err;
   }
+}
+
 
 
   /* match pairs */
