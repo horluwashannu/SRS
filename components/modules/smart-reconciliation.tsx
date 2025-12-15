@@ -195,7 +195,7 @@ export function SmartReconciliation({ userId }: Props) {
   const [uploadedCurrRemaining, setUploadedCurrRemaining] = useState<TransactionRow[]>([]);
   const [autoKnockedOffCurr, setAutoKnockedOffCurr] = useState<TransactionRow[]>([]);
 
-  /*  arrays */
+  /* all-in-one arrays */
   const [uploadedAll, setUploadedAll] = useState<TransactionRow[]>([]);
   const [uploadedAllDebits, setUploadedAllDebits] = useState<TransactionRow[]>([]);
   const [uploadedAllCredits, setUploadedAllCredits] = useState<TransactionRow[]>([]);
@@ -357,268 +357,413 @@ export function SmartReconciliation({ userId }: Props) {
     sheetExpanded,
   ]);
 
- /* Parsing single sheet with meta (FIXED) */
-async function parseUploadedSheetWithMetadata(file: File) {
-  const logLines: string[] = [];
-  setUploadProgress(5);
-  const arrayBuffer = await file.arrayBuffer();
-  setUploadProgress(15);
+  /* Parsing single sheet with meta (kept mostly) */
+  async function parseUploadedSheetWithMetadata(file: File) {
+    const logLines: string[] = [];
+    setUploadProgress(5);
+    const arrayBuffer = await file.arrayBuffer();
+    setUploadProgress(15);
 
-  const workbook = XLSX.read(arrayBuffer, {
-    type: "array",
-    cellDates: true,
-    raw: false,
-    defval: "",
-  });
-  setUploadProgress(25);
+    const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true, raw: false, defval: "" });
+    setUploadProgress(25);
 
-  if (!workbook || !workbook.SheetNames || workbook.SheetNames.length === 0) {
-    throw new Error("No sheets");
-  }
+    if (!workbook || !workbook.SheetNames || workbook.SheetNames.length === 0) {
+      throw new Error("No sheets");
+    }
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
 
-  const sheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
+    const sheetRef = sheet && sheet["!ref"] ? sheet["!ref"] : undefined;
+    const readOptions: any = { header: 1, defval: "", blankrows: true };
+    if (sheetRef) readOptions.range = sheetRef;
 
-  const sheetRef = sheet && sheet["!ref"] ? sheet["!ref"] : undefined;
-  const readOptions: any = { header: 1, defval: "", blankrows: true };
-  if (sheetRef) readOptions.range = sheetRef;
+    const allRows: any[] = XLSX.utils.sheet_to_json(sheet, readOptions);
+    setUploadProgress(40);
+    logLines.push(`Rows: ${allRows.length}`);
 
-  const allRows: any[] = XLSX.utils.sheet_to_json(sheet, readOptions);
-  setUploadProgress(40);
-  logLines.push(`Rows: ${allRows.length}`);
-
-  /* ---------------- META (unchanged) ---------------- */
-  const meta: any = {};
-  for (let r = 0; r < Math.min(allRows.length, 50); r++) {
-    const row = allRows[r] || [];
-    for (let c = 0; c < row.length; c++) {
-      const cellRaw = row[c];
-      if (cellRaw == null) continue;
-
-      const cellText = String(cellRaw).trim();
-      if (!cellText) continue;
-
-      const norm = normalizeLabel(cellText);
-      for (const mk of Object.keys(META_KEY_MAP)) {
-        const mkNorm = normalizeLabel(mk);
-        if (norm === mkNorm || norm.includes(mkNorm) || mkNorm.includes(norm)) {
-          const valueCandidate = row[c + 1] ?? row[c + 2] ?? "";
-          const field = META_KEY_MAP[mkNorm] ?? META_KEY_MAP[mk];
-          if (field) {
-            meta[field] = String(valueCandidate ?? "").trim();
-            logLines.push(`meta '${mk}' -> '${meta[field]}' at r${r + 1}`);
+    const meta: any = {};
+    for (let r = 0; r < Math.min(allRows.length, 50); r++) {
+      const row = allRows[r] || [];
+      for (let c = 0; c < row.length; c++) {
+        const cellRaw = row[c];
+        if (cellRaw === null || cellRaw === undefined) continue;
+        const cellText = String(cellRaw).trim();
+        if (!cellText) continue;
+        const norm = normalizeLabel(cellText);
+        for (const mk of Object.keys(META_KEY_MAP)) {
+          const mkNorm = normalizeLabel(mk);
+          if (norm === mkNorm || norm.includes(mkNorm) || mkNorm.includes(norm)) {
+            const valueCandidate = row[c + 1] ?? row[c + 2] ?? "";
+            const field = META_KEY_MAP[mkNorm] ?? META_KEY_MAP[mk];
+            if (field) {
+              meta[field] = (valueCandidate === null || valueCandidate === undefined) ? "" : String(valueCandidate).trim();
+              logLines.push(`meta '${mk}' -> '${meta[field]}' at r${r + 1}`);
+            }
           }
         }
       }
     }
-  }
 
-  /* ---------------- HEADER DETECTION (FIXED) ---------------- */
-  let headerRowIndex: number | null = null;
-  let headerCols: {
-    dateIdx: number;
-    narrationIdx: number;
-    amountIdx: number;
-    ageIdx: number;
-  } | null = null;
-
-  for (let r = 0; r < Math.min(allRows.length, 40); r++) {
-    const row = allRows[r] || [];
-    const rowText = row.map((c: any) => String(c ?? "").toLowerCase()).join("|");
-
-    // ✅ RELAXED RULE (date + amount)
-    if (
-      rowText.includes("date") &&
-      (rowText.includes("amount") ||
-        rowText.includes("debit") ||
-        rowText.includes("credit"))
-    ) {
-      headerRowIndex = r;
-      const lower = row.map((c: any) => String(c ?? "").toLowerCase());
-
-      const dateIdx = lower.findIndex(
-        (h) =>
-          h.includes("tran_date") ||
-          h.includes("tran date") ||
-          h.includes("transaction date") ||
-          h === "date"
-      );
-
-      const narrationIdx = lower.findIndex(
-        (h) =>
-          h.includes("narr") ||
-          h.includes("description") ||
-          h.includes("details")
-      );
-
-      const amountIdx = lower.findIndex(
-        (h) => h.includes("amount") || h.includes("amt")
-      );
-
-      const ageIdx = lower.findIndex(
-        (h) => h.includes("age") || h.includes("days")
-      );
-
-      headerCols = {
-        dateIdx: dateIdx >= 0 ? dateIdx : 0,
-        narrationIdx: narrationIdx >= 0 ? narrationIdx : 1,
-        amountIdx: amountIdx >= 0 ? amountIdx : 2,
-        ageIdx: ageIdx >= 0 ? ageIdx : 3,
-      };
-
-      logLines.push(`header r${r + 1} => ${JSON.stringify(headerCols)}`);
-      break;
+    let headerRowIndex: number | null = null;
+    let headerCols: { dateIdx: number; narrationIdx: number; amountIdx: number; ageIdx: number } | null = null;
+    for (let r = 0; r < Math.min(allRows.length, 40); r++) {
+      const row = allRows[r] || [];
+      const rowText = row.map((c: any) => String(c ?? "").toLowerCase()).join("|");
+      if (rowText.includes("tran") && (rowText.includes("narr") || rowText.includes("narration")) && rowText.includes("amount")) {
+        headerRowIndex = r;
+        const lower = (row || []).map((c: any) => String(c ?? "").toLowerCase());
+        const dateIdx = lower.findIndex((h: string) => h.includes("tran_date") || h.includes("tran date") || h.includes("transaction date") || h === "date" || h.includes("tran"));
+        const narrationIdx = lower.findIndex((h: string) => h.includes("narr") || h.includes("description") || h.includes("narration") || h.includes("narrative"));
+        const amountIdx = lower.findIndex((h: string) => h.includes("amount") || h.includes("amt"));
+        const ageIdx = lower.findIndex((h: string) => h.includes("age") || h.includes("days"));
+        headerCols = {
+          dateIdx: dateIdx >= 0 ? dateIdx : 0,
+          narrationIdx: narrationIdx >= 0 ? narrationIdx : 1,
+          amountIdx: amountIdx >= 0 ? amountIdx : 2,
+          ageIdx: ageIdx >= 0 ? ageIdx : 3,
+        };
+        logLines.push(`header r${r + 1} => ${JSON.stringify(headerCols)}`);
+        break;
+      }
     }
+
+    let dataStartRow = 8;
+    let mappingByHeader = false;
+    if (headerRowIndex !== null && headerCols !== null) {
+      dataStartRow = headerRowIndex + 1;
+      mappingByHeader = true;
+    } else {
+      if (allRows.length < 9) dataStartRow = 0;
+      logLines.push("no header; default start row 9");
+    }
+
+    const parsedRows: TransactionRow[] = [];
+    let runningProofTotal = 0;
+    let parsedCount = 0;
+    let skippedCount = 0;
+
+    for (let r = dataStartRow; r < allRows.length; r++) {
+      const row = allRows[r] || [];
+      const joinedUpper = row.map((c: any) => String(c ?? "").trim()).join(" ").toUpperCase();
+
+      if (joinedUpper.includes("PROOF TOTAL")) {
+        continue;
+      }
+
+      if (joinedUpper.includes("SYSTEM BALANCE")) {
+        let sysIndex = -1;
+        for (let c = 0; c < row.length; c++) {
+          const cellText = String(row[c] ?? "").toUpperCase();
+          if (cellText.includes("SYSTEM") && cellText.includes("BALANCE")) {
+            sysIndex = c;
+            break;
+          }
+        }
+        if (sysIndex >= 0) {
+          const candidate = row[sysIndex + 1];
+          if (candidate !== undefined && candidate !== null && String(candidate).trim() !== "") {
+            const parsed = robustParseNumber(candidate);
+            meta.SystemBalance = parsed.value;
+            logLines.push(`system balance ${parsed.value}`);
+          } else {
+            let fallbackVal: any = null;
+            for (let c = sysIndex + 1; c < row.length; c++) {
+              const tryCell = row[c];
+              const parsedTry = robustParseNumber(tryCell);
+              if (parsedTry && Number.isFinite(parsedTry.value) && parsedTry.original.trim() !== "") {
+                fallbackVal = parsedTry.value;
+                meta.SystemBalance = parsedTry.value;
+                logLines.push(`system balance fallback ${parsedTry.value}`);
+                break;
+              }
+            }
+            if (fallbackVal === null) {
+              // no value
+            }
+          }
+        } else {
+          let foundNum: number | null = null;
+          for (let c = row.length - 1; c >= 0; c--) {
+            const parsedTry = robustParseNumber(row[c]);
+            if (parsedTry && Number.isFinite(parsedTry.value) && parsedTry.original.trim() !== "") {
+              foundNum = parsedTry.value;
+              meta.SystemBalance = parsedTry.value;
+              logLines.push(`system balance found ${parsedTry.value}`);
+              break;
+            }
+          }
+        }
+        break;
+      }
+
+      let rawDateCandidate: any = "";
+      let rawNarrationCandidate: any = "";
+      let rawAmountCandidate: any = "";
+      let rawAgeCandidate: any = "";
+      if (mappingByHeader && headerCols) {
+        rawDateCandidate = row[headerCols.dateIdx] ?? "";
+        rawNarrationCandidate = row[headerCols.narrationIdx] ?? "";
+        rawAmountCandidate = row[headerCols.amountIdx] ?? "";
+        rawAgeCandidate = row[headerCols.ageIdx] ?? "";
+      } else {
+        rawDateCandidate = row[0] ?? "";
+        rawNarrationCandidate = row[1] ?? "";
+        rawAmountCandidate = row[2] ?? "";
+        rawAgeCandidate = row[3] ?? "";
+      }
+
+      const isRowEmpty = [rawDateCandidate, rawNarrationCandidate, rawAmountCandidate].every((v) => (v === "" || v === null || v === undefined));
+      if (isRowEmpty) {
+        skippedCount++;
+        continue;
+      }
+      const parsedAmount = robustParseNumber(rawAmountCandidate);
+      const numericAmount = parsedAmount.value;
+      if (numericAmount === 0 && (!String(rawNarrationCandidate || "").trim()) && !rawDateCandidate) {
+        skippedCount++;
+        continue;
+      }
+      const dateStr = excelDateToJS(rawDateCandidate);
+      const narrationClean = String(rawNarrationCandidate ?? "").replace(/\s+/g, " ").trim();
+      const first15 = narrationClean.substring(0, 15).toUpperCase().trim();
+      const last15 = narrationClean.slice(-15).toUpperCase().trim();
+      const absAmount = Math.abs(numericAmount);
+      const helper1 = `${first15}_${absAmount}`;
+      const helper2 = `${last15}_${absAmount}`;
+      const newRow: TransactionRow = {
+        Date: dateStr || "",
+        Narration: String(rawNarrationCandidate ?? ""),
+        OriginalAmount: parsedAmount.original,
+        SignedAmount: numericAmount,
+        IsNegative: parsedAmount.isNegative,
+        Age: rawAgeCandidate ?? undefined,
+        First15: first15,
+        Last15: last15,
+        HelperKey1: helper1,
+        HelperKey2: helper2,
+        __id: uid(),
+      };
+      parsedRows.push(newRow);
+      runningProofTotal += numericAmount;
+      parsedCount++;
+    }
+
+    logLines.push(`parsed ${parsedCount}; skipped ${skippedCount}`);
+    logLines.push(`running proof ${runningProofTotal}`);
+
+    return {
+      rows: parsedRows,
+      meta,
+      proofTotal: runningProofTotal,
+      log: logLines.join("\n"),
+    };
   }
 
-  let dataStartRow = 8;
-  let mappingByHeader = false;
-
-  if (headerRowIndex !== null && headerCols !== null) {
-    dataStartRow = headerRowIndex + 1;
-    mappingByHeader = true;
-  } else {
-    if (allRows.length < 9) dataStartRow = 0;
-    logLines.push("no header; fallback start");
+  async function parseSpecificSheetFromWorkbookBuffer(buffer: ArrayBuffer, sheetName: string, fileNameHint = "sheet_extract.xlsx") {
+    const wb: XLSX.WorkBook = XLSX.read(buffer, { type: "array", cellDates: true, raw: false, defval: "" });
+    if (!wb.Sheets || !wb.Sheets[sheetName]) {
+      throw new Error("Sheet not found");
+    }
+    const newWb: XLSX.WorkBook = { SheetNames: [sheetName], Sheets: { [sheetName]: wb.Sheets[sheetName] } };
+    const outBuffer = XLSX.write(newWb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([outBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const file = new File([blob], fileNameHint, { type: blob.type });
+    return parseUploadedSheetWithMetadata(file);
   }
 
-  /* ---------------- PARSE ROWS (FIXED) ---------------- */
-  const parsedRows: TransactionRow[] = [];
-  let runningProofTotal = 0;
-
-  for (let r = dataStartRow; r < allRows.length; r++) {
-    const row = allRows[r] || [];
-    const joinedUpper = row.map((c: any) => String(c ?? "").trim()).join(" ").toUpperCase();
-
-    if (joinedUpper.includes("PROOF TOTAL")) continue;
-
-    if (joinedUpper.includes("SYSTEM BALANCE")) {
-      // extract but DO NOT break
-      for (let c = row.length - 1; c >= 0; c--) {
-        const parsedTry = robustParseNumber(row[c]);
-        if (parsedTry && Number.isFinite(parsedTry.value)) {
-          meta.SystemBalance = parsedTry.value;
-          logLines.push(`system balance ${parsedTry.value}`);
+  /* For All-in-One: parse sheet and split debit/credit */
+  async function parseAllInOne(file: File) {
+    setUploadProgress(5);
+    const arrayBuffer = await file.arrayBuffer();
+    setUploadProgress(15);
+    const wb = XLSX.read(arrayBuffer, { type: "array", cellDates: true, raw: false, defval: "" });
+    setUploadProgress(25);
+    const sheetName = wb.SheetNames[0];
+    const sheet = wb.Sheets[sheetName];
+    const rawRows: any[] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", blankrows: true });
+    // find header
+    let headerRowIndex = 0;
+    let header: string[] = [];
+    for (let r = 0; r < Math.min(rawRows.length, 20); r++) {
+      const row = rawRows[r] || [];
+      const joined = row.map((c: any) => String(c ?? "").toLowerCase()).join("|");
+      if (joined.includes("date") && (joined.includes("amount") || joined.includes("amt"))) {
+        headerRowIndex = r;
+        header = (row || []).map((c: any) => String(c ?? ""));
+        break;
+      }
+    }
+    if (!header || header.length === 0) {
+      // fallback: assume first row is header
+      header = (rawRows[0] || []).map((c: any) => String(c ?? ""));
+      headerRowIndex = 0;
+    }
+    const lowerHeader = header.map(h => String(h).toLowerCase());
+    const dateIdx = lowerHeader.findIndex(h => h.includes("date"));
+    const narrIdx = lowerHeader.findIndex(h => h.includes("narr") || h.includes("desc") || h.includes("description"));
+    const amtIdx = lowerHeader.findIndex(h => h.includes("amount") || h.includes("amt"));
+    // detect side column
+    const sideIdxCandidates = ["side", "type", "dr", "dr/cr", "drcr", "debit", "credit", "debit/credit", "sign", "dc"];
+    let sideIdx = -1;
+    for (let i = 0; i < lowerHeader.length; i++) {
+      const h = lowerHeader[i];
+      for (const cand of sideIdxCandidates) {
+        if (h.includes(cand)) {
+          sideIdx = i;
           break;
         }
       }
-      continue; // ✅ DO NOT BREAK
+      if (sideIdx !== -1) break;
     }
-
-    let rawDate, rawNarr, rawAmt, rawAge;
-    if (mappingByHeader && headerCols) {
-      rawDate = row[headerCols.dateIdx];
-      rawNarr = row[headerCols.narrationIdx];
-      rawAmt = row[headerCols.amountIdx];
-      rawAge = row[headerCols.ageIdx];
-    } else {
-      rawDate = row[0];
-      rawNarr = row[1];
-      rawAmt = row[2];
-      rawAge = row[3];
+    // parse rows
+    const parsedRows: TransactionRow[] = [];
+    for (let r = headerRowIndex + 1; r < rawRows.length; r++) {
+      const row = rawRows[r] || [];
+      const rawDate = row[dateIdx] ?? "";
+      const rawNarr = row[narrIdx] ?? row.slice(1, Math.min(4, row.length)).join(" ") ?? "";
+      const rawAmt = row[amtIdx] ?? row[row.length - 1] ?? "";
+      const parsedAmt = robustParseNumber(rawAmt);
+      const num = parsedAmt.value;
+      const dateStr = excelDateToJS(rawDate);
+      const narrationClean = String(rawNarr ?? "").replace(/\s+/g, " ").trim();
+      const first15 = narrationClean.substring(0, 15).toUpperCase().trim();
+      const last15 = narrationClean.slice(-15).toUpperCase().trim();
+      const absAmount = Math.abs(num);
+      const helper1 = `${first15}_${absAmount}`;
+      const helper2 = `${last15}_${absAmount}`;
+      const newRow: TransactionRow = {
+        Date: dateStr || "",
+        Narration: String(rawNarr ?? ""),
+        OriginalAmount: parsedAmt.original,
+        SignedAmount: num,
+        IsNegative: parsedAmt.isNegative,
+        First15: first15,
+        Last15: last15,
+        HelperKey1: helper1,
+        HelperKey2: helper2,
+        __id: uid(),
+        SheetName: sheetName,
+      };
+      // determine side
+      let side: Side | null = null;
+      if (sideIdx >= 0) {
+        const v = String(row[sideIdx] ?? "").toLowerCase().trim();
+        if (v) {
+          if (v.includes("dr") || v.includes("debit") || v === "d") side = "debit";
+          if (v.includes("cr") || v.includes("credit") || v === "c") side = "credit";
+          if (v.includes("debit") && v.includes("credit")) side = null;
+          if (v.includes("-") && !side) {
+            // nothing
+          }
+        }
+      }
+      if (!side) {
+        // fall back to sign
+        if (num < 0) side = "debit";
+        else side = "credit";
+      }
+      newRow.side = side;
+      newRow.status = "pending";
+      parsedRows.push(newRow);
     }
-
-    // ✅ allow amount-only rows
-    if (
-      (rawAmt === "" || rawAmt == null) &&
-      (rawNarr === "" || rawNarr == null)
-    ) {
-      continue;
-    }
-
-    const parsedAmount = robustParseNumber(rawAmt);
-    const numericAmount = parsedAmount.value;
-    if (!Number.isFinite(numericAmount) || numericAmount === 0) continue;
-
-    const dateStr = excelDateToJS(rawDate);
-    const narrationClean = String(rawNarr ?? "").replace(/\s+/g, " ").trim();
-
-    const first15 = narrationClean.substring(0, 15).toUpperCase();
-    const last15 = narrationClean.slice(-15).toUpperCase();
-    const absAmount = Math.abs(numericAmount);
-
-    parsedRows.push({
-      Date: dateStr || "",
-      Narration: String(rawNarr ?? ""),
-      OriginalAmount: parsedAmount.original,
-      SignedAmount: numericAmount,
-      IsNegative: parsedAmount.isNegative,
-      Age: rawAge ?? undefined,
-      First15: first15,
-      Last15: last15,
-      HelperKey1: `${first15}_${absAmount}`,
-      HelperKey2: `${last15}_${absAmount}`,
-      __id: uid(),
-    });
-
-    runningProofTotal += numericAmount;
+    setUploadProgress(60);
+    // split
+    const debits = parsedRows.filter(r => r.side === "debit");
+    const credits = parsedRows.filter(r => r.side === "credit");
+    setUploadProgress(100);
+    return {
+      rows: parsedRows,
+      debits,
+      credits,
+      sheetName,
+    };
   }
 
-  if (parsedRows.length === 0) {
-    throw new Error("No transaction rows detected");
+  /* auto knock */
+  function autoKnockOffWithinCurrent(rows: TransactionRow[]) {
+    const used = new Set<number>();
+    const knockedOff: TransactionRow[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      if (used.has(i)) continue;
+      const a = rows[i];
+      const aAbs = Math.abs(a.SignedAmount ?? 0);
+      for (let j = i + 1; j < rows.length; j++) {
+        if (used.has(j)) continue;
+        const b = rows[j];
+        const bAbs = Math.abs(b.SignedAmount ?? 0);
+        if (aAbs !== bAbs) continue;
+        if ((a.SignedAmount ?? 0) * (b.SignedAmount ?? 0) >= 0) continue;
+        const aKey1 = `${a.HelperKey1}_${aAbs}`;
+        const aKey2 = `${a.HelperKey2}_${aAbs}`;
+        const bKey1 = `${b.HelperKey1}_${bAbs}`;
+        const bKey2 = `${b.HelperKey2}_${bAbs}`;
+        const match =
+          aKey1 === bKey1 ||
+          aKey1 === bKey2 ||
+          aKey2 === bKey1 ||
+          aKey2 === bKey2;
+        if (match) {
+          used.add(i);
+          used.add(j);
+          const aCopy = { ...a, status: "auto" as Status };
+          const bCopy = { ...b, status: "auto" as Status };
+          knockedOff.push(aCopy);
+          knockedOff.push(bCopy);
+          break;
+        }
+      }
+    }
+    const remaining: TransactionRow[] = rows.filter((_, idx) => !used.has(idx));
+    return { remaining, knockedOff };
   }
-
-  logLines.push(`parsed ${parsedRows.length}`);
-  logLines.push(`running proof ${runningProofTotal}`);
-
-  return {
-    rows: parsedRows,
-    meta,
-    proofTotal: runningProofTotal,
-    log: logLines.join("\n"),
-  };
-}
 
   /* match pairs */
- function matchPairs(
-  debits: TransactionRow[],
-  credits: TransactionRow[]
-) {
-  const creditIndex = new Map<string, number[]>();
-
-  // index credits by HelperKey
-  credits.forEach((c, idx) => {
-    const key1 = `${c.HelperKey1}_${Math.abs(c.SignedAmount)}`;
-    const key2 = `${c.HelperKey2}_${Math.abs(c.SignedAmount)}`;
-    if (!creditIndex.has(key1)) creditIndex.set(key1, []);
-    if (!creditIndex.has(key2)) creditIndex.set(key2, []);
-    creditIndex.get(key1)!.push(idx);
-    creditIndex.get(key2)!.push(idx);
-  });
-
-  const matchedPairs = [];
-  const pendingDebits = [];
-  const used = new Set<number>();
-
-  for (const d of debits) {
-    const k1 = `${d.HelperKey1}_${Math.abs(d.SignedAmount)}`;
-    const k2 = `${d.HelperKey2}_${Math.abs(d.SignedAmount)}`;
-
-    let foundIdx = null;
-
-    for (const k of [k1, k2]) {
-      const arr = creditIndex.get(k);
-      if (arr) {
-        const free = arr.find(i => !used.has(i));
-        if (free !== undefined) {
-          foundIdx = free;
-          break;
+  function matchPairs(
+    debits: TransactionRow[],
+    credits: TransactionRow[]
+  ): {
+    matchedPairs: { debit: TransactionRow; credit: TransactionRow }[];
+    pendingDebits: TransactionRow[];
+    pendingCredits: TransactionRow[];
+  } {
+    const creditIndex = new Map<string, number[]>();
+    credits.forEach((c, idx) => {
+      const k1 = `${c.HelperKey1}_${Math.abs(c.SignedAmount ?? 0)}`;
+      const k2 = `${c.HelperKey2}_${Math.abs(c.SignedAmount ?? 0)}`;
+      if (!creditIndex.has(k1)) creditIndex.set(k1, []);
+      if (!creditIndex.has(k2)) creditIndex.set(k2, []);
+      creditIndex.get(k1)!.push(idx);
+      creditIndex.get(k2)!.push(idx);
+    });
+    const matchedPairs: { debit: TransactionRow; credit: TransactionRow }[] = [];
+    const pendingDebits: TransactionRow[] = [];
+    const usedCreditIdx = new Set<number>();
+    for (const d of debits) {
+      let foundIdx: number | null = null;
+      const keysToTry = [
+        `${d.HelperKey1}_${Math.abs(d.SignedAmount ?? 0)}`,
+        `${d.HelperKey2}_${Math.abs(d.SignedAmount ?? 0)}`
+      ];
+      for (const k of keysToTry) {
+        const arr = creditIndex.get(k);
+        if (arr && arr.length) {
+          const idx = arr.find((i) => !usedCreditIdx.has(i));
+          if (idx !== undefined) {
+            foundIdx = idx;
+            break;
+          }
         }
       }
+      if (foundIdx !== null) {
+        usedCreditIdx.add(foundIdx);
+        matchedPairs.push({ debit: d, credit: credits[foundIdx] });
+      } else {
+        pendingDebits.push(d);
+      }
     }
-
-    if (foundIdx !== null) {
-      used.add(foundIdx);
-      matchedPairs.push({ debit: d, credit: credits[foundIdx] });
-    } else {
-      pendingDebits.push(d);
-    }
+    const pendingCredits = credits.filter((_, i) => !usedCreditIdx.has(i));
+    return { matchedPairs, pendingDebits, pendingCredits };
   }
-
-  const pendingCredits = credits.filter((_, i) => !used.has(i));
-
-  return { matchedPairs, pendingDebits, pendingCredits };
-}
 
   /* handle uploads (previous/current/all) */
   const handleFileUpload = async (file: File, fileType: "previous" | "current" | "all") => {
@@ -631,46 +776,16 @@ async function parseUploadedSheetWithMetadata(file: File) {
 
       if (mode === "all" && fileType === "all") {
         // parse all-in-one
-         const { rows, debits, credits, meta, proofTotal } = await parseAllInOne(file);
+        const { rows, debits, credits, sheetName } = await parseAllInOne(file);
+        setUploadedAll(rows);
+        setUploadedAllDebits(debits);
+        setUploadedAllCredits(credits);
+        setAllFile(file);
+        setLastParseLog(`${new Date().toISOString()} - ${file.name}\nAll-in-one parsed. Debits: ${debits.length}, Credits: ${credits.length}`);
+        alert(`All-in-one parsed: D ${debits.length} • C ${credits.length}`);
+        return;
+      }
 
-  setUploadedAll(rows);
-  setUploadedAllDebits(debits);
-  setUploadedAllCredits(credits);
-  setAllFile(file);
-
-  // APPLY META TO UI HEADER BOXES
-  applySheetMetaToHeader(meta);
-
-  // UPDATE PROOF TOTAL FOR ALL-IN-ONE
-  setSheetProofs(prev => ({
-    ...prev,
-    ["ALL-IN-ONE"]: {
-      matchedSum: 0,
-      itemCount: rows.length,
-      status: "pending",
-    }
-  }));
-
-  // SYSTEM BALANCE (only if provided and not locked)
-  if (meta.SystemBalance && !systemBalanceLocked) {
-    const s = robustParseNumber(meta.SystemBalance);
-    if (!isNaN(s.value)) {
-      setSystemBalanceInput(String(s.value));
-      setSystemBalance(s.value);
-    }
-  }
-
-  setLastParseLog(
-    `${new Date().toISOString()} - ${file.name}\n` +
-    `All-in-One parsed.\n` +
-    `Debits: ${debits.length}, Credits: ${credits.length}\n` +
-    `Proof Total: ${proofTotal}`
-  );
-
-  alert(`All-in-one parsed:\nDebits: ${debits.length}\nCredits: ${credits.length}`);
-
-  return;
-}
       const arrayBuffer = await file.arrayBuffer();
       const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true, raw: false, defval: "" });
 
