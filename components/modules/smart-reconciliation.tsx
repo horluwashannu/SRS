@@ -357,8 +357,8 @@ export function SmartReconciliation({ userId }: Props) {
     sheetExpanded,
   ]);
 
-  /* Parsing single sheet with meta (kept mostly) */
-  async function parseUploadedSheetWithMetadata(file: File) {
+  /* Parsing single sheet with meta (kept mostly) */  
+ async function parseUploadedSheetWithMetadata(file: File) {
     const logLines: string[] = [];
     setUploadProgress(5);
     const arrayBuffer = await file.arrayBuffer();
