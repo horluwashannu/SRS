@@ -803,6 +803,31 @@ async function parseAllInOne(file: File) {
   };
 }
 
+function pastedTextToFile(pastedText: string): File {
+  const rows = pastedText
+    .split(/\r?\n/)
+    .map(r => r.trim())
+    .filter(Boolean)
+    .map(line => line.split("\t"));
+
+  const sheet = XLSX.utils.aoa_to_sheet(rows, { cellDates: true });
+  const wb: XLSX.WorkBook = {
+    SheetNames: ["ALL_IN_ONE"],
+    Sheets: { ALL_IN_ONE: sheet },
+  };
+
+  const buffer = XLSX.write(wb, {
+    bookType: "xlsx",
+    type: "array",
+    cellDates: true,
+  });
+
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+
+  return new File([blob], "pasted-all-in-one.xlsx", { type: blob.type });
+}
 
 
   /* match pairs */
@@ -852,7 +877,55 @@ async function parseAllInOne(file: File) {
     const pendingCredits = credits.filter((_, i) => !usedCreditIdx.has(i));
     return { matchedPairs, pendingDebits, pendingCredits };
   }
+  
+/* convert pasted excel text → File */
+function pastedTextToFile(pastedText: string): File {
+  const rows = pastedText
+    .split(/\r?\n/)
+    .filter((l) => l.trim() !== "")
+    .map((line) => line.split("\t"));
 
+  const sheet = XLSX.utils.aoa_to_sheet(rows);
+  const wb: XLSX.WorkBook = {
+    SheetNames: ["PASTED"],
+    Sheets: { PASTED: sheet },
+  };
+
+  const buffer = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+
+  return new File([blob], "pasted.xlsx", { type: blob.type });
+}
+/* handle paste for all-in-one */
+const handleAllInOnePaste = async (pastedText: string) => {
+  try {
+    if (!pastedText.trim()) {
+      alert("Nothing to parse");
+      return;
+    }
+
+    const file = pastedTextToFile(pastedText);
+
+    const { rows, debits, credits } = await parseAllInOne(file);
+
+    setUploadedAll(rows);
+    setUploadedAllDebits(debits);
+    setUploadedAllCredits(credits);
+    setAllFile(file);
+
+    setLastParseLog(
+      `${new Date().toISOString()} - pasted\nAll-in-one parsed. Debits: ${debits.length}, Credits: ${credits.length}`
+    );
+
+    alert(`Pasted parsed: D ${debits.length} • C ${credits.length}`);
+  } catch (e) {
+    console.error("PASTE PARSE ERROR", e);
+    alert("Paste parsing failed");
+  }
+};
+  
   /* handle uploads (previous/current/all) */
   const handleFileUpload = async (file: File, fileType: "previous" | "current" | "all") => {
     try {
@@ -2088,6 +2161,21 @@ async function parseAllInOne(file: File) {
                   <span className="mt-1 text-xs text-muted-foreground">.xlsx/.xls</span>
                   <input type="file" className="hidden" accept=".xlsx,.xls" ref={fileInputAllRef} onChange={(e) => e.target.files?.[0] && (setAllFile(e.target.files[0]), handleFileUpload(e.target.files[0], "all"))} />
                 </label>
+              <div className="mt-4">
+  <div className="text-xs font-medium mb-1">
+    Or paste from Excel (Ctrl+C → Ctrl+V)
+  </div>
+
+  <textarea
+    className="w-full min-h-[120px] rounded-md border p-2 text-xs"
+    placeholder="Paste rows copied from Excel here…"
+    onPaste={(e) => {
+      e.preventDefault();
+      const text = e.clipboardData.getData("text");
+      handleAllInOnePaste(text);
+    }}
+  />
+</div>
 
                 <div className="mt-3">
                   <div className="text-xs font-medium">Preview</div>
