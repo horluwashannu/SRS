@@ -163,43 +163,56 @@ const parseGenericExcel = (file: File) =>
    PDF loader (dynamic import + CDN fallback)
    --------------------------- */
 async function loadPdfJsSafe(): Promise<any> {
-  if (typeof window === "undefined") throw new Error("PDF parsing must run in the browser")
+  if (typeof window === "undefined") {
+    throw new Error("PDF parsing must run in the browser")
+  }
+
   try {
-    // try dynamic import
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore
-    const pdfjs = await import("pdfjs-dist")
+    // ✅ SAFE browser-only build (NO canvas)
+    const pdfjs = await import("pdfjs-dist/build/pdf")
+
     try {
-      if (pdfjs && pdfjs.GlobalWorkerOptions) {
-        // best-effort; leave unspecified if not available
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        pdfjs.GlobalWorkerOptions.workerSrc = (pdfjs && pdfjs.GlobalWorkerOptions && pdfjs.GlobalWorkerOptions.workerSrc) || ""
+      if (pdfjs.GlobalWorkerOptions) {
+        pdfjs.GlobalWorkerOptions.workerSrc =
+          pdfjs.GlobalWorkerOptions.workerSrc ||
+          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"
       }
-    } catch (e) {}
+    } catch {}
+
     return pdfjs
-  } catch (err) {
-    // fallback to CDN
+  } catch {
+    // ---- CDN fallback (unchanged logic) ----
     return new Promise((resolve, reject) => {
       try {
         if ((window as any).pdfjsLib) return resolve((window as any).pdfjsLib)
+
         const script = document.createElement("script")
         script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
         script.async = true
+
         script.onload = () => {
-          const lib = (window as any).pdfjsLib || (window as any).pdfjs || (window as any).pdfjsDist || null
+          const lib =
+            (window as any).pdfjsLib ||
+            (window as any).pdfjs ||
+            (window as any).pdfjsDist
+
           if (lib) {
             try {
               if (lib.GlobalWorkerOptions) {
-                lib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"
+                lib.GlobalWorkerOptions.workerSrc =
+                  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"
               }
-            } catch (e) {}
+            } catch {}
+
             resolve(lib)
           } else {
             reject(new Error("pdf.js loaded but global lib missing"))
           }
         }
-        script.onerror = () => reject(new Error("Failed to load pdf.js from CDN"))
+
+        script.onerror = () =>
+          reject(new Error("Failed to load pdf.js from CDN"))
+
         document.body.appendChild(script)
       } catch (e) {
         reject(e)
@@ -207,6 +220,7 @@ async function loadPdfJsSafe(): Promise<any> {
     })
   }
 }
+
 
 /* ---------------------------
    Improved PDF rebuilder parser
