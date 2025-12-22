@@ -1,5 +1,5 @@
 "use client";
-
+export const runtime = "nodejs"
 import React, { useEffect, useMemo, useState } from "react"
 import * as XLSX from "xlsx"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
@@ -163,25 +163,26 @@ const parseGenericExcel = (file: File) =>
    PDF loader (dynamic import + CDN fallback)
    --------------------------- */
 async function loadPdfJsSafe(): Promise<any> {
+  // 🔒 HARD STOP: never allow pdfjs during build or SSR
   if (typeof window === "undefined") {
-    throw new Error("PDF parsing must run in the browser")
+    throw new Error("PDF parsing must run in the browser only")
   }
 
-  try {
-    // ✅ SAFE browser-only build (NO canvas)
-    const pdfjs = await import("pdfjs-dist/build/pdf")
+  // Prevent Next.js from tree-shaking / preloading pdfjs
+  const dynamicImport = new Function("m", "return import(m)")
 
-    try {
-      if (pdfjs.GlobalWorkerOptions) {
-        pdfjs.GlobalWorkerOptions.workerSrc =
-          pdfjs.GlobalWorkerOptions.workerSrc ||
-          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"
-      }
-    } catch {}
+  try {
+    const pdfjs = await dynamicImport("pdfjs-dist/build/pdf")
+
+    if (pdfjs?.GlobalWorkerOptions) {
+      pdfjs.GlobalWorkerOptions.workerSrc =
+        pdfjs.GlobalWorkerOptions.workerSrc ||
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"
+    }
 
     return pdfjs
   } catch {
-    // ---- CDN fallback (unchanged logic) ----
+    // ---- CDN fallback ----
     return new Promise((resolve, reject) => {
       try {
         if ((window as any).pdfjsLib) return resolve((window as any).pdfjsLib)
@@ -196,23 +197,17 @@ async function loadPdfJsSafe(): Promise<any> {
             (window as any).pdfjs ||
             (window as any).pdfjsDist
 
-          if (lib) {
-            try {
-              if (lib.GlobalWorkerOptions) {
-                lib.GlobalWorkerOptions.workerSrc =
-                  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"
-              }
-            } catch {}
+          if (!lib) return reject(new Error("pdf.js loaded but not exposed"))
 
-            resolve(lib)
-          } else {
-            reject(new Error("pdf.js loaded but global lib missing"))
+          if (lib.GlobalWorkerOptions) {
+            lib.GlobalWorkerOptions.workerSrc =
+              "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"
           }
+
+          resolve(lib)
         }
 
-        script.onerror = () =>
-          reject(new Error("Failed to load pdf.js from CDN"))
-
+        script.onerror = () => reject(new Error("Failed to load pdf.js CDN"))
         document.body.appendChild(script)
       } catch (e) {
         reject(e)
@@ -227,42 +222,77 @@ async function loadPdfJsSafe(): Promise<any> {
    - Attempts to handle Ecobank Instant Payment layout
    - Splits into blocks by S/N + Date and extracts fields robustly
    --------------------------- */
-async function parsePdfRebuilder(file: File, onProgress?: (msg: string) => void) {
-  if (typeof window === "undefined") throw new Error("PDF parsing must run in the browser")
-  onProgress?.("Loading pdf runtime...")
-  const pdfjsLib = await loadPdfJsSafe()
-  if (!pdfjsLib) throw new Error("pdfjs not available")
+async function parsePdfRebuilder(
+  file: File,
+  onProgress?: (msg: string) => void
+) {
+  // 🔒 Never allow execution during SSR / build
+  if (typeof window === "undefined") {
+    throw new Error("PDF parsing must run in the browser")
+  }
 
-  // set worker path if possible
+  onProgress?.("Loading PDF runtime...")
+  const pdfjsLib = await loadPdfJsSafe()
+  if (!pdfjsLib) {
+    throw new Error("pdfjs not available")
+  }
+
+  // 🔒 Force a known-good worker (override broken bundled paths)
   try {
     if (pdfjsLib.GlobalWorkerOptions) {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsLib.GlobalWorkerOptions.workerSrc || "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"
     }
-  } catch (e) {}
+  } catch {
+    // ignore – worker will fallback internally
+  }
 
   onProgress?.("Reading file bytes...")
   const arrayBuffer = await file.arrayBuffer()
+
   onProgress?.("Loading document...")
-  const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer })
+  const loadingTask = pdfjsLib.getDocument({
+  data: arrayBuffer,
+  disableAutoFetch: true,
+  disableStream: true,
+})
+
   const pdf = await loadingTask.promise
   onProgress?.(`Document has ${pdf.numPages} pages`)
 
   const pagesText: string[] = []
+
   for (let p = 1; p <= pdf.numPages; p++) {
+    onProgress?.(`Extracting page ${p} / ${pdf.numPages}`)
+
     const page = await pdf.getPage(p)
     const txt = await page.getTextContent()
-    // join item strings with spaces; we will re-introduce boundaries by heuristics
-    const pageText = txt.items.map((it: any) => (it.str || "")).join(" ")
-    // common PDF text duplication sometimes causes repeated header/footer — try to trim
-    pagesText.push(pageText.trim())
-    onProgress?.(`Extracted page ${p} / ${pdf.numPages}`)
+
+    // Join text items with spaces; boundaries reintroduced later by heuristics
+    const pageText = txt.items
+      .map((it: any) => (typeof it?.str === "string" ? it.str : ""))
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim()
+
+    // Push cleaned page text
+    pagesText.push(pageText)
+
     await sleep(6)
   }
 
   onProgress?.("Merging pages and cleaning text...")
-  // merge pages with a unique separator to preserve page boundaries
+
+  // Preserve page boundaries using a unique separator
   const fullText = pagesText.join("\n\n---PAGE_BREAK---\n\n")
 
+  // ⬇⬇⬇
+  // Continue with your existing regex / transaction parsing logic here
+  // using `fullText`
+  // ⬆⬆⬆
+
+  return fullText
+}
   // Remove common UI/footer junk lines (URLs and navigation terms)
   let cleanedText = fullText
     .replace(/https?:\/\/[^\s]+/g, " ") // remove URLs
@@ -807,7 +837,7 @@ export function SmartCallOver() {
 
             <Input
               type="file"
-              accept={txType === "nip" || txType === "neft" ? ".pdf" : ".xlsx,.xls,.csv,.pdf"}
+              accept={txType === "nip" || txType === "neft" ? "application/pdf,.pdf" : ".xlsx,.xls,.csv"}
               onChange={handleFileChange}
               className="cursor-pointer"
             />
