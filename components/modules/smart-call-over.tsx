@@ -491,13 +491,13 @@ const final = results
     Status: r.Status || "",
     "Reference ID": r["Reference ID"] || "",
   }))
-  .filter((r) => r.Sender || r.Beneficiary || r.Account || r.Amount); // remove empty rows
+  .filter((r) => r.Sender || r.Beneficiary || r.Account || r.Amount) // drop empty rows
 
-// Sort by S/N ascending if present
-final.sort((a, b) => (Number(a["S/N"]) || 0) - (Number(b["S/N"]) || 0));
+final.sort((a, b) => (Number(a["S/N"]) || 0) - (Number(b["S/N"]) || 0))
 
-onProgress?.(`Parsed ${final.length} transactions`);
-return final;
+onProgress?.(`Parsed ${final.length} transactions`)
+return final
+
 
 
 /* ---------------------------
