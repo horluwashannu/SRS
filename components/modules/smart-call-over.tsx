@@ -468,28 +468,6 @@ async function parsePdfRebuilder(
     }
   }
 
-  // Final normalization: ensure amounts are strings and remove empties
-  const final = results
-    .map((r) => ({
-      ...r,
-      Amount: r.Amount ? String(r.Amount).replace(/[^0-9.\-]/g, "") : "",
-      Date: r.Date || "",
-      Sender: r.Sender || "",
-      Beneficiary: r.Beneficiary || "",
-      Account: r.Account || "",
-      Bank: r.Bank || "",
-      Branch: r.Branch || "",
-      Status: r.Status || "",
-      "Reference ID": r["Reference ID"] || "",
-    }))
-    .filter((r) => r.Sender || r.Beneficiary || r.Account || r.Amount) // drop completely empty rows
-
-  // Sort by S/N asc if sensible numbers present
-  final.sort((a, b) => (Number(a["S/N"]) || 0) - (Number(b["S/N"]) || 0))
-
-  onProgress?.(`Parsed ${final.length} transactions`)
-  return final
-}
 
 /* ---------------------------
    Component
