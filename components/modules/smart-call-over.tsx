@@ -468,6 +468,14 @@ async function parsePdfRebuilder(
     }
   }
 
+const final = results
+  .map(...)
+  .filter(...)
+
+final.sort(...)
+
+onProgress?.(`Parsed ${final.length} transactions`)
+return final
 
 /* ---------------------------
    Component
