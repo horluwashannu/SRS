@@ -392,90 +392,113 @@ async function parsePdfRebuilder(
     }
 
     // Status: search for 'successfully' or 'approved' text inside the block (try to capture phrase)
-    const statusMatch = (match = body.match(/\b(Approved or completed|Approved|approved|Completed|completed|successfully|Successfully)\b/)) ? match[0] : ""
-    const status = statusMatch ? statusMatch : ""
+  // Normalize and collect structured blocks
+const statusMatch = (body.match(/\b(Approved or completed|Approved|approved|Completed|completed|successfully|Successfully)\b/)) 
+  ? body.match(/\b(Approved or completed|Approved|approved|Completed|completed|successfully|Successfully)\b/)![0] 
+  : "";
+const status = statusMatch || "";
 
-    // Ensure minimal normalization
-    sender = normalize(sender)
-    beneficiary = normalize(beneficiary)
-    const rawText = normalize(match[0] + " " + body)
+// Ensure minimal normalization
+sender = normalize(sender);
+beneficiary = normalize(beneficiary);
+const rawText = normalize((statusMatch || "") + " " + body);
 
-    results.push({
-      "S/N": sn,
-      Date: date,
-      Sender: sender,
-      Branch: branch,
-      Bank: bank,
-      Beneficiary: beneficiary,
-      Account: account,
-      Amount: amount,
-      Status: status,
-      "Reference ID": refId,
-      rawText,
-      // exception flags - default false
-      bvnChecked: false,
-      alterChecked: false,
-      amountChecked: false,
-      signChecked: false,
-    })
-  }
+results.push({
+  "S/N": sn,
+  Date: date,
+  Sender: sender,
+  Branch: branch,
+  Bank: bank,
+  Beneficiary: beneficiary,
+  Account: account,
+  Amount: amount,
+  Status: status,
+  "Reference ID": refId,
+  rawText,
+  bvnChecked: false,
+  alterChecked: false,
+  amountChecked: false,
+  signChecked: false,
+});
 
-  // If the block regex didn't find anything (some PDFs extract poorly), fallback to line scanning:
-  if (results.length === 0) {
-    onProgress?.("No structured blocks found — trying fallback line parsing...")
-    const lines = cleanedText.split(/\n|---PAGE_BREAK---/).map((l) => l.trim()).filter(Boolean)
-    for (let i = 0; i < lines.length; i++) {
-      const l = lines[i]
-      const dateMatch = l.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/)
-      if (dateMatch) {
-        const snMatch = l.match(/^\s*(\d+)\b/)
-        const sn = snMatch ? Number(snMatch[1]) : i + 1
-        const date = dateMatch[1]
-        // look ahead a couple of lines for account / amount / bank
-        const windowText = lines.slice(i, Math.min(i + 4, lines.length)).join(" ")
-        const accMatch = windowText.match(/(\b\d{8,16}\b)/)
-        const account = accMatch ? accMatch[1] : ""
-        const amountMatch = windowText.match(/([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})?)/)
-        const amount = amountMatch ? amountMatch[0].replace(/,/g, "") : ""
-        let bank = ""
-        for (const b of BANK_KEYWORDS) {
-          if (new RegExp(`\\b${b.replace(/\s+/g, "\\s+")}\\b`, "i").test(windowText)) {
-            bank = b
-            break
-          }
+// Fallback line parsing if no structured blocks found
+if (results.length === 0) {
+  onProgress?.("No structured blocks found — trying fallback line parsing...");
+  const lines = cleanedText
+    .split(/\n|---PAGE_BREAK---/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    const dateMatch = l.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
+    if (dateMatch) {
+      const snMatch = l.match(/^\s*(\d+)\b/);
+      const sn = snMatch ? Number(snMatch[1]) : i + 1;
+      const date = dateMatch[1];
+
+      // Look ahead a few lines for account / amount / bank
+      const windowText = lines.slice(i, Math.min(i + 4, lines.length)).join(" ");
+      const accMatch = windowText.match(/\b\d{8,16}\b/);
+      const account = accMatch ? accMatch[0] : "";
+      const amountMatch = windowText.match(/([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})?)/);
+      const amount = amountMatch ? amountMatch[0].replace(/,/g, "") : "";
+
+      let bank = "";
+      for (const b of BANK_KEYWORDS) {
+        if (new RegExp(`\\b${b.replace(/\s+/g, "\\s+")}\\b`, "i").test(windowText)) {
+          bank = b;
+          break;
         }
-        const parts = windowText.split(/\s{2,}|,|\||\t/).map((s) => s.trim()).filter(Boolean)
-        const sender = parts[1] || parts[0] || ""
-        const beneficiary = parts[2] || parts[1] || ""
-        results.push({
-          "S/N": sn,
-          Date: date,
-          Sender: normalize(sender),
-          Branch: "",
-          Bank: bank,
-          Beneficiary: normalize(beneficiary),
-          Account: account,
-          Amount: amount,
-          Status: "",
-          "Reference ID": "",
-          rawText: windowText,
-          bvnChecked: false,
-          alterChecked: false,
-          amountChecked: false,
-          signChecked: false,
-        })
       }
+
+      const parts = windowText.split(/\s{2,}|,|\||\t/).map((s) => s.trim()).filter(Boolean);
+      const sender = parts[1] || parts[0] || "";
+      const beneficiary = parts[2] || parts[1] || "";
+
+      results.push({
+        "S/N": sn,
+        Date: date,
+        Sender: normalize(sender),
+        Branch: "",
+        Bank: bank,
+        Beneficiary: normalize(beneficiary),
+        Account: account,
+        Amount: amount,
+        Status: "",
+        "Reference ID": "",
+        rawText: windowText,
+        bvnChecked: false,
+        alterChecked: false,
+        amountChecked: false,
+        signChecked: false,
+      });
     }
   }
+}
 
+// Clean up and finalize results
 const final = results
-  .map(...)
-  .filter(...)
+  .map((r) => ({
+    ...r,
+    Amount: r.Amount ? String(r.Amount).replace(/[^0-9.\-]/g, "") : "",
+    Date: r.Date || "",
+    Sender: r.Sender || "",
+    Beneficiary: r.Beneficiary || "",
+    Account: r.Account || "",
+    Bank: r.Bank || "",
+    Branch: r.Branch || "",
+    Status: r.Status || "",
+    "Reference ID": r["Reference ID"] || "",
+  }))
+  .filter((r) => r.Sender || r.Beneficiary || r.Account || r.Amount); // remove empty rows
 
-final.sort(...)
+// Sort by S/N ascending if present
+final.sort((a, b) => (Number(a["S/N"]) || 0) - (Number(b["S/N"]) || 0));
 
-onProgress?.(`Parsed ${final.length} transactions`)
-return final
+onProgress?.(`Parsed ${final.length} transactions`);
+return final;
+
 
 /* ---------------------------
    Component
