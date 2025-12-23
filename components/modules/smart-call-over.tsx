@@ -1,5 +1,5 @@
 "use client";
-export const runtime = "nodejs"
+
 import React, { useEffect, useMemo, useState } from "react"
 import * as XLSX from "xlsx"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
@@ -290,8 +290,6 @@ async function parsePdfRebuilder(
   // Continue with your existing regex / transaction parsing logic here
   // using `fullText`
   // ⬆⬆⬆
-
-  return fullText
 }
   // Remove common UI/footer junk lines (URLs and navigation terms)
   let cleanedText = fullText
@@ -497,7 +495,7 @@ final.sort((a, b) => (Number(a["S/N"]) || 0) - (Number(b["S/N"]) || 0))
 
 onProgress?.(`Parsed ${final.length} transactions`)
 return final
-
+  }
 
 
 /* ---------------------------
