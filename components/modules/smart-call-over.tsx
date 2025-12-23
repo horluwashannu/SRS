@@ -476,26 +476,35 @@ if (results.length === 0) {
 }
 
 // Clean up and finalize results
-const final = results
-  .map((r) => ({
-    ...r,
-    Amount: r.Amount ? String(r.Amount).replace(/[^0-9.\-]/g, "") : "",
-    Date: r.Date || "",
-    Sender: r.Sender || "",
-    Beneficiary: r.Beneficiary || "",
-    Account: r.Account || "",
-    Bank: r.Bank || "",
-    Branch: r.Branch || "",
-    Status: r.Status || "",
-    "Reference ID": r["Reference ID"] || "",
-  }))
-  .filter((r) => r.Sender || r.Beneficiary || r.Account || r.Amount) // drop empty rows
+async function parsePdfRebuilder(
+  results: any[],
+  onProgress?: (msg: string) => void
+) {
+  const final = results
+    .map((r) => ({
+      ...r,
+      Amount: r.Amount ? String(r.Amount).replace(/[^0-9.\-]/g, "") : "",
+      Date: r.Date || "",
+      Sender: r.Sender || "",
+      Beneficiary: r.Beneficiary || "",
+      Account: r.Account || "",
+      Bank: r.Bank || "",
+      Branch: r.Branch || "",
+      Status: r.Status || "",
+      "Reference ID": r["Reference ID"] || "",
+    }))
+    .filter(
+      (r) => r.Sender || r.Beneficiary || r.Account || r.Amount
+    )
 
-final.sort((a, b) => (Number(a["S/N"]) || 0) - (Number(b["S/N"]) || 0))
+  final.sort(
+    (a, b) => (Number(a["S/N"]) || 0) - (Number(b["S/N"]) || 0)
+  )
 
-onProgress?.(`Parsed ${final.length} transactions`)
-return final
-  }
+  onProgress?.(`Parsed ${final.length} transactions`)
+  return final
+}
+
 
 
 /* ---------------------------
